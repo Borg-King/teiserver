@@ -9,7 +9,7 @@
 </script>
 
 <%= central_component("picker_script",
-  module: Central.Account.UserLib,
+  module: Teiserver.Account.UserLib,
   name: "account_user",
   title: "User search"
 ) %>
@@ -20,7 +20,7 @@
 <script src={Routes.static_path(@conn, "/js/select2.js")}>
 </script>
 
-<form action={~p"/teiserver/admin/chat"} method="post" class="form-horizontal" id="search-box">
+<form action={~p"/admin/chat"} method="post" class="form-horizontal" id="search-box">
   <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
 
   <div class="row">
@@ -54,7 +54,7 @@
 
     <div class="col-md-4 col-lg-3 col-xl-2 my-2">
       <label for="search_account_user" class="control-label">User: </label>
-      <%= render(CentralWeb.Account.UserView, "picker.html",
+      <%= render(TeiserverWeb.Account.UserView, "picker.html",
         input_name: "search[account_user]",
         value: @params["account_user"]
       ) %>
@@ -89,7 +89,7 @@
         id: "search_mode",
         selected: @params["mode"],
         enumerable: [
-          %{id: "Lobby", icon: Teiserver.Battle.LobbyLib.icon(), colour: fg},
+          %{id: "Lobby", icon: Teiserver.Lobby.icon(), colour: fg},
           %{id: "Party", icon: Teiserver.Account.PartyLib.icon(), colour: fg},
           %{id: "Room", icon: Teiserver.Chat.LobbyMessageLib.icon(), colour: fg}
         ]

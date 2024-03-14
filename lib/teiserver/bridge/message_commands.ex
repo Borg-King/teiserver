@@ -1,9 +1,9 @@
 defmodule Teiserver.Bridge.MessageCommands do
   @moduledoc false
-  alias Teiserver.{User, Account}
+  alias Teiserver.{CacheUser, Account}
   alias Teiserver.Account.AccoladeLib
-  alias Central.Helpers.NumberHelper
-  alias alias Teiserver.Bridge.UnitNames
+  alias Teiserver.Helper.NumberHelper
+  alias Teiserver.Bridge.UnitNames
   alias Nostrum.Api
   require Logger
 
@@ -21,10 +21,10 @@ defmodule Teiserver.Bridge.MessageCommands do
 
     [cmd | remaining] = String.split(content, " ")
     remaining = Enum.join(remaining, " ")
-    user = User.get_user_by_discord_id(author)
+    user = CacheUser.get_user_by_discord_id(author)
 
     if user do
-      User.update_user(%{user | discord_dm_channel: channel},
+      CacheUser.update_user(%{user | discord_dm_channel_id: channel, discord_dm_channel: channel},
         persist: true
       )
     end
@@ -63,17 +63,23 @@ defmodule Teiserver.Bridge.MessageCommands do
     case String.split(remaining, "-") do
       [userid_str, given_code] ->
         userid = NumberHelper.int_parse(userid_str)
-        correct_code = Central.cache_get(:discord_bridge_account_codes, userid)
+        correct_code = Teiserver.cache_get(:discord_bridge_account_codes, userid)
 
         if given_code == correct_code do
-          Central.cache_delete(:discord_bridge_account_codes, userid)
-          user = User.get_user_by_id(userid)
+          Teiserver.cache_delete(:discord_bridge_account_codes, userid)
+          user = CacheUser.get_user_by_id(userid)
 
-          User.update_user(%{user | discord_id: discord_id, discord_dm_channel: channel},
+          CacheUser.update_user(
+            %{
+              user
+              | discord_id: discord_id,
+                discord_dm_channel: channel,
+                discord_dm_channel_id: channel
+            },
             persist: true
           )
 
-          User.recache_user(user.id)
+          CacheUser.recache_user(user.id)
 
           reply(channel, "Congratulations, your accounts are now linked.")
         else
@@ -168,8 +174,8 @@ defmodule Teiserver.Bridge.MessageCommands do
     player_hours = (Map.get(stats, "player_minutes", 0) / 60) |> round
     spectator_hours = (Map.get(stats, "spectator_minutes", 0) / 60) |> round
 
-    host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
-    profile_link = "https://#{host}/teiserver/profile/#{user.id}"
+    host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
+    profile_link = "https://#{host}/profile/#{user.id}"
 
     accolades = AccoladeLib.get_player_accolades(user.id)
 
@@ -205,7 +211,7 @@ defmodule Teiserver.Bridge.MessageCommands do
   def handle_command({_sender, _}, "help", _remaining, channel) do
     reply(
       channel,
-      "Currently we don't have a list of commands, please feel free to suggest them to Teifion though!."
+      "Currently we don't have a list of commands, please feel free to suggest them to the devs though!."
     )
   end
 
@@ -235,7 +241,7 @@ defmodule Teiserver.Bridge.MessageCommands do
         true
 
       true ->
-        User.allow?(user, "Moderator")
+        CacheUser.allow?(user, "Moderator")
     end
   end
 

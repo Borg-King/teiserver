@@ -1,6 +1,6 @@
 defmodule Teiserver.Communication.TextCallback do
   @moduledoc false
-  use CentralWeb, :schema
+  use TeiserverWeb, :schema
 
   schema "communication_text_callbacks" do
     field :name, :string
@@ -12,6 +12,7 @@ defmodule Teiserver.Communication.TextCallback do
     field :triggers, {:array, :string}
 
     field :response, :string
+    field :last_triggered, :map, default: %{}
 
     field :rules, :map, default: %{}
 
@@ -27,11 +28,13 @@ defmodule Teiserver.Communication.TextCallback do
       |> trim_strings(~w(name)a)
 
     struct
-    |> cast(params, ~w(name icon colour triggers response enabled rules)a)
+    |> cast(params, ~w(name icon colour triggers response enabled rules last_triggered)a)
     |> validate_required(~w(name icon colour triggers response)a)
     |> validate_length(:triggers, min: 1)
   end
 
   @spec authorize(atom, Plug.Conn.t(), Map.t()) :: boolean
-  def authorize(_action, conn, _params), do: allow?(conn, "Server")
+  def authorize(:index, conn, _params), do: allow_any?(conn, ["Overwatch", "Contributor"])
+  def authorize(:show, conn, _params), do: allow_any?(conn, ["Overwatch", "Contributor"])
+  def authorize(_action, conn, _params), do: allow?(conn, "Admin")
 end

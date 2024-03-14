@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.TeiserverChatLogs do
+defmodule Teiserver.Repo.Migrations.TeiserverChatLogs do
   use Ecto.Migration
 
   def change do
@@ -14,7 +14,7 @@ defmodule Central.Repo.Migrations.TeiserverChatLogs do
     create table(:teiserver_lobby_messages) do
       add :content, :text
       add :user_id, references(:account_users, on_delete: :nothing)
-      add :lobby_guid, :string
+      add :match_id, references(:teiserver_battle_matches, on_delete: :nothing)
       add :inserted_at, :utc_datetime
     end
 

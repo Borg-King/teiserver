@@ -64,7 +64,9 @@ defmodule Teiserver.Game.BalancerServer do
   end
 
   def handle_cast({:set_algorithm, algorithm}, state) do
-    if Enum.member?(~w(loser_picks forceparty)a, algorithm) do
+    allowed_choices = BalanceLib.algorithm_modules() |> Map.keys()
+
+    if Enum.member?(allowed_choices, algorithm) do
       {:noreply, %{state | algorithm: algorithm}}
     else
       Logger.error("No BalanceServer handler for algorithm of #{algorithm}")
@@ -271,7 +273,7 @@ defmodule Teiserver.Game.BalancerServer do
       lobby_id: lobby_id,
       host_id: founder_id,
       hashes: %{},
-      algorithm: :loser_picks,
+      algorithm: "loser_picks",
       last_balance_hash: nil
     })
   end
@@ -283,8 +285,8 @@ defmodule Teiserver.Game.BalancerServer do
     Logger.metadata(request_id: "BalancerServer##{opts.lobby_id}")
 
     # These were never actually used
-    # :ok = PubSub.subscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
-    # :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
+    # :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+    # :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_server")
 
     # Update the queue pids cache to point to this process
     Horde.Registry.register(

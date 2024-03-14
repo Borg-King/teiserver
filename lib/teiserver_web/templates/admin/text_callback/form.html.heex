@@ -48,6 +48,18 @@
   </div>
 
   <div class="row">
+    <div class="col-lg-6 my-2">
+      <%= central_component("checkbox",
+        name: "text_callback[rules][delete_trigger]",
+        id: "text_callback_rules_delete_trigger",
+        value: "true",
+        label: "Delete triggering message",
+        checked: Map.get(@changeset.data.rules, "delete_trigger", false) == "true"
+      ) %>
+    </div>
+  </div>
+
+  <div class="row">
     <div class="col-md-8 my-2">
       <%= label(f, :response, class: "control-label") %>
       <%= textarea(f, :response, class: "form-control monospace", rows: 16) %>

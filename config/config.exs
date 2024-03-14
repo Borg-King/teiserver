@@ -1,6 +1,9 @@
 import Config
 
-config :central, Central,
+config :iex,
+  ansi_enabled: true
+
+config :teiserver, Teiserver,
   site_title: "BAR",
   site_suffix: "",
   site_description: "",
@@ -8,26 +11,25 @@ config :central, Central,
   credit: "Teifion Jordan"
 
 # Default configs
-config :central, Teiserver.Config,
+config :teiserver, Teiserver.Config,
   defaults: %{
     tz: "UTC"
   }
 
-config :central,
-  ecto_repos: [Central.Repo]
+config :teiserver,
+  ecto_repos: [Teiserver.Repo]
 
 # Configures the endpoint
-config :central, CentralWeb.Endpoint,
+config :teiserver, TeiserverWeb.Endpoint,
   url: [host: "localhost"],
+  # This is overriden in your secret config, it's here only to allow things to run easily
   secret_key_base: "6FN12Jv4ZITAK1fq7ehD0MTRvbLsXYWj+wLY3ifkzzlcUIcpUJK7aG/ptrJSemAy",
   live_view: [signing_salt: "wZVVigZo"],
   render_errors: [
-    # render_errors: [view: CentralWeb.ErrorView, accepts: ~w(html json), layout: false],
-    formats: [html: CentralWeb.ErrorHTML, json: CentralWeb.ErrorJSON],
+    formats: [html: TeiserverWeb.ErrorHTML, json: TeiserverWeb.ErrorJSON],
     layout: false
   ],
-  # render_errors: [view: CentralWeb.ErrorView, accepts: ~w(html json), layout: false],
-  pubsub_server: Central.PubSub
+  pubsub_server: Teiserver.PubSub
 
 config :esbuild,
   version: "0.14.41",
@@ -38,7 +40,7 @@ config :esbuild,
     env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
   ]
 
-config :central, Teiserver,
+config :teiserver, Teiserver,
   ports: [
     tcp: 8200,
     tls: 8201,
@@ -64,11 +66,10 @@ config :central, Teiserver,
   default_spring_protocol: Teiserver.Protocols.Spring,
   default_tachyon_protocol: Teiserver.Protocols.Tachyon.V1.Tachyon,
   github_repo: "https://github.com/beyond-all-reason/teiserver",
-  enable_discord_bridge: false,
+  enable_discord_bridge: true,
   enable_coordinator_mode: true,
   enable_managed_lobbies: false,
   enable_accolade_mode: true,
-  enable_agent_mode: false,
   enable_match_monitor: true,
   enable_hailstorm: false,
   bot_email_domain: "teiserver",
@@ -80,7 +81,7 @@ config :central, Teiserver,
     "A verification code has been sent to your email address. Please read our terms of service at <<<site_url>>> and the code of conduct at <<<URL>>>. Then enter your six digit code below if you agree to the terms.",
   accept_all_emails: false,
   retention: %{
-    telemetry_infolog: 14,
+    telemetry_infolog: 31,
     telemetry_events: 90,
     battle_match_rated: 365,
     battle_match_unrated: 365,
@@ -101,13 +102,14 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 # This secret key is overwritten in prod.secret.exs
-config :central, Central.Account.Guardian,
-  issuer: "central",
+config :teiserver, Teiserver.Account.Guardian,
+  issuer: "teiserver",
+  # This is overriden in your secret config, it's here only to allow things to run easily
   secret_key: "9vJcJOYwsjdIQ9IhfOI5F9GQMykuNjBW58FY9S/TqMsq6gRdKgY05jscQAFVKfwa",
   ttl: {30, :days}
 
-config :central, Oban,
-  repo: Central.Repo,
+config :teiserver, Oban,
+  repo: Teiserver.Repo,
   plugins: [
     {Oban.Plugins.Pruner, max_age: 3600},
     {Oban.Plugins.Cron,
@@ -129,22 +131,22 @@ config :central, Oban,
        {"17 * * * *", Teiserver.Battle.Tasks.CleanupTask},
 
        # Every minute
-       {"* * * * *", Teiserver.Telemetry.Tasks.PersistServerMinuteTask},
+       {"* * * * *", Teiserver.Logging.Tasks.PersistServerMinuteTask},
        {"* * * * *", Teiserver.Moderation.RefreshUserRestrictionsTask},
 
        # Every minute
        {"* * * * *", Teiserver.Battle.Tasks.PostMatchProcessTask},
 
        # 2am
-       {"1 2 * * *", Teiserver.Telemetry.Tasks.PersistServerDayTask},
-       {"2 2 * * *", Teiserver.Telemetry.Tasks.PersistServerWeekTask},
-       {"3 2 * * *", Teiserver.Telemetry.Tasks.PersistServerMonthTask},
-       {"4 2 * * *", Teiserver.Telemetry.Tasks.PersistServerQuarterTask},
-       {"5 2 * * *", Teiserver.Telemetry.Tasks.PersistServerYearTask},
-       {"6 2 * * *", Teiserver.Telemetry.Tasks.PersistMatchDayTask},
-       {"7 2 * * *", Teiserver.Telemetry.Tasks.PersistMatchMonthTask},
+       {"1 2 * * *", Teiserver.Logging.Tasks.PersistServerDayTask},
+       {"2 2 * * *", Teiserver.Logging.Tasks.PersistServerWeekTask},
+       {"3 2 * * *", Teiserver.Logging.Tasks.PersistServerMonthTask},
+       {"4 2 * * *", Teiserver.Logging.Tasks.PersistServerQuarterTask},
+       {"5 2 * * *", Teiserver.Logging.Tasks.PersistServerYearTask},
+       {"6 2 * * *", Teiserver.Logging.Tasks.PersistMatchDayTask},
+       {"7 2 * * *", Teiserver.Logging.Tasks.PersistMatchMonthTask},
        {"8 2 * * *", Teiserver.Telemetry.InfologCleanupTask},
-       {"1 2 * * *", Teiserver.Telemetry.Tasks.PersistUserActivityDayTask},
+       {"9 2 * * *", Teiserver.Logging.Tasks.PersistUserActivityDayTask},
 
        # 2:43
        {"43 2 * * *", Teiserver.Game.AchievementCleanupTask},
@@ -156,7 +158,7 @@ config :central, Oban,
   ],
   queues: [logging: 1, cleanup: 1, teiserver: 10]
 
-config :central, :time_zone_database, Tzdata.TimeZoneDatabase
+config :teiserver, :time_zone_database, Tzdata.TimeZoneDatabase
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

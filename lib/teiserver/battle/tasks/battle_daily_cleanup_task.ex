@@ -1,9 +1,10 @@
 defmodule Teiserver.Battle.Tasks.CleanupTask do
+  @moduledoc false
   use Oban.Worker, queue: :cleanup
 
-  alias Central.Repo
+  alias Teiserver.Repo
   alias Teiserver.{Battle}
-  alias Central.Helpers.StringHelper
+  alias Teiserver.Helper.StringHelper
   require Logger
 
   @strip_data_days 35
@@ -28,7 +29,7 @@ defmodule Teiserver.Battle.Tasks.CleanupTask do
   end
 
   defp get_days() do
-    Application.get_env(:central, Teiserver)[:retention][:lobby_chat] + 1
+    Application.get_env(:teiserver, Teiserver)[:retention][:lobby_chat] + 1
   end
 
   def delete_unstarted_matches() do
@@ -65,7 +66,7 @@ defmodule Teiserver.Battle.Tasks.CleanupTask do
   def delete_old_matches() do
     # Rated matches - We don't delete them, they have rating logs attached to them
     # battle_match_rated_days =
-    #   Application.get_env(:central, Teiserver)[:retention][:battle_match_rated]
+    #   Application.get_env(:teiserver, Teiserver)[:retention][:battle_match_rated]
 
     # Battle.list_matches(
     #   search: [
@@ -80,7 +81,7 @@ defmodule Teiserver.Battle.Tasks.CleanupTask do
 
     # Unrated matches
     battle_match_unrated_days =
-      Application.get_env(:central, Teiserver)[:retention][:battle_match_unrated]
+      Application.get_env(:teiserver, Teiserver)[:retention][:battle_match_unrated]
 
     Battle.list_matches(
       search: [
@@ -115,7 +116,32 @@ defmodule Teiserver.Battle.Tasks.CleanupTask do
 
     Ecto.Adapters.SQL.query!(
       Repo,
-      "UPDATE teiserver_telemetry_match_events SET match_id = NULL WHERE match_id = ANY($1)",
+      "UPDATE telemetry_simple_match_events SET match_id = NULL WHERE match_id = ANY($1)",
+      [ids]
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "UPDATE telemetry_complex_match_events SET match_id = NULL WHERE match_id = ANY($1)",
+      [ids]
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "UPDATE telemetry_simple_lobby_events SET match_id = NULL WHERE match_id = ANY($1)",
+      [ids]
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "UPDATE telemetry_complex_lobby_events SET match_id = NULL WHERE match_id = ANY($1)",
+      [ids]
+    )
+
+    # Update report groups
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "UPDATE moderation_report_groups SET match_id = NULL WHERE match_id = ANY($1)",
       [ids]
     )
 

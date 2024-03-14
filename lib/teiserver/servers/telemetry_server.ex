@@ -1,7 +1,6 @@
 defmodule Teiserver.Telemetry.TelemetryServer do
   use GenServer
-  alias Teiserver.Battle.Lobby
-  alias Teiserver.Client
+  alias Teiserver.{Lobby, Client}
   alias Teiserver.Account.LoginThrottleServer
   require Logger
   alias Phoenix.PubSub
@@ -111,7 +110,7 @@ defmodule Teiserver.Telemetry.TelemetryServer do
     }
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_telemetry",
       %{
         channel: "teiserver_telemetry",
@@ -120,10 +119,10 @@ defmodule Teiserver.Telemetry.TelemetryServer do
       }
     )
 
-    Central.cache_put(:application_temp_cache, :telemetry_data, data)
+    Teiserver.cache_put(:application_temp_cache, :telemetry_data, data)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_public_stats",
       %{
         channel: "teiserver_public_stats",

@@ -5,10 +5,10 @@ defmodule Teiserver.Account.RecalculateUserDailyStatTask do
   """
   use Oban.Worker, queue: :cleanup
 
-  alias Central.Repo
+  alias Teiserver.Repo
   import Ecto.Query, warn: false
-  alias Teiserver.{User, Account}
-  alias alias Teiserver.Telemetry.ServerDayLog
+  alias Teiserver.Account
+  alias Teiserver.Logging.UserActivityDayLog
 
   # Teiserver.Account.RecalculateUserDailyStatTask.perform(nil)
 
@@ -32,15 +32,16 @@ defmodule Teiserver.Account.RecalculateUserDailyStatTask do
     user_ids =
       Account.list_users(
         search: [
-          data_greater_than: {"last_login", start_date |> to_string},
-          data_equal: {"bot", "false"}
+          data_greater_than: {"last_login_mins", start_date |> to_string},
+          data_equal: {"bot", "false"},
+          smurf_of: false
         ],
         limit: :infinity,
         select: [:id]
       )
       |> Enum.map(fn %{id: id} -> id end)
 
-    query = from(logs in ServerDayLog)
+    query = from(logs in UserActivityDayLog)
 
     stream = Repo.stream(query, max_rows: 50)
 
@@ -59,8 +60,7 @@ defmodule Teiserver.Account.RecalculateUserDailyStatTask do
         )
         |> Enum.filter(fn {userid, _} ->
           if Enum.member?(user_ids, userid) do
-            username = User.get_username(userid)
-            username != nil
+            Account.get_username(userid) != nil
           end
         end)
         |> Enum.each(fn {userid, data_rows} ->
@@ -85,9 +85,7 @@ defmodule Teiserver.Account.RecalculateUserDailyStatTask do
 
   # Take the log of the day and extract the user related data we actually
   # want to aggregate
-  defp convert_to_user_log(%{data: data}) do
-    user_data = data["minutes_per_user"]
-
+  defp convert_to_user_log(%{data: user_data}) do
     Map.keys(user_data["total"])
     |> Enum.map(fn userid_str ->
       userid = String.to_integer(userid_str)

@@ -1,29 +1,29 @@
 defmodule TeiserverWeb.Battle.MatchController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.{Battle, Game, Account}
   alias Teiserver.Game.MatchRatingLib
   alias Teiserver.Battle.MatchLib
-  alias Central.Helpers.TimexHelper
+  alias Teiserver.Helper.TimexHelper
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Battle.Match,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "match",
     sub_menu_active: "match"
   )
 
-  plug :add_breadcrumb, name: 'Matches', url: '/teiserver/matches'
+  plug :add_breadcrumb, name: 'Matches', url: '/battle'
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def index(conn, _params) do
     matches =
       Battle.list_matches(
         search: [
-          user_id: conn.user_id
+          user_id: conn.assigns.current_user.id
         ],
         preload: [
           :queue
@@ -71,7 +71,7 @@ defmodule TeiserverWeb.Battle.MatchController do
       |> Map.drop([nil])
       |> Map.filter(fn {_id, members} -> Enum.count(members) > 1 end)
       |> Map.keys()
-      |> Enum.zip(Central.Helpers.StylingHelper.bright_hex_colour_list())
+      |> Enum.zip(Teiserver.Helper.StylingHelper.bright_hex_colour_list())
       |> Map.new()
 
     conn
@@ -169,23 +169,26 @@ defmodule TeiserverWeb.Battle.MatchController do
         preload: [:match, :match_membership]
       )
 
-    data = logs
+    data =
+      logs
       |> List.foldl(%{}, fn rating, acc ->
         Map.update(
           acc,
           TimexHelper.date_to_str(rating.inserted_at, format: :ymd),
           {rating.value["skill"], rating.value["uncertainty"], rating.value["rating_value"], 1},
           fn {skill, uncertainty, rating_value, count} ->
-            {skill + rating.value["skill"], uncertainty + rating.value["uncertainty"], rating_value + rating.value["rating_value"], count + 1}
+            {skill + rating.value["skill"], uncertainty + rating.value["uncertainty"],
+             rating_value + rating.value["rating_value"], count + 1}
           end
         )
       end)
-      |> Enum.map(fn {date, {skill, uncertainty, rating_value, count}} -> %{
+      |> Enum.map(fn {date, {skill, uncertainty, rating_value, count}} ->
+        %{
           date: date,
           rating_value: Float.round(rating_value / count, 2),
           skill: Float.round(skill / count, 2),
           uncertainty: Float.round(uncertainty / count, 2),
-          count: count,
+          count: count
         }
       end)
       |> Enum.sort_by(fn rating -> rating.date end)
@@ -195,6 +198,7 @@ defmodule TeiserverWeb.Battle.MatchController do
     |> assign(:rating_type_list, MatchRatingLib.rating_type_list())
     |> assign(:ratings, ratings)
     |> assign(:data, data)
+    |> add_breadcrumb(name: "Progression", url: "/battle/progression")
     |> render("ratings_graph.html")
   end
 end

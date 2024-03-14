@@ -1,10 +1,10 @@
 defmodule Teiserver.Moderation.Report do
   @moduledoc false
-  use CentralWeb, :schema
+  use TeiserverWeb, :schema
 
   schema "moderation_reports" do
-    belongs_to :reporter, Central.Account.User
-    belongs_to :target, Central.Account.User
+    belongs_to :reporter, Teiserver.Account.User
+    belongs_to :target, Teiserver.Account.User
 
     field :type, :string
     field :sub_type, :string
@@ -14,6 +14,7 @@ defmodule Teiserver.Moderation.Report do
     belongs_to :match, Teiserver.Battle.Match
     field :relationship, :string
     belongs_to :result, Teiserver.Moderation.Action
+    belongs_to :report_group, Teiserver.Moderation.ReportGroup
 
     has_many :responses, Teiserver.Moderation.Response
 
@@ -29,7 +30,7 @@ defmodule Teiserver.Moderation.Report do
     struct
     |> cast(
       params,
-      ~w(reporter_id target_id type sub_type extra_text match_id relationship result_id closed)a
+      ~w(reporter_id target_id type sub_type extra_text match_id relationship result_id closed report_group_id)a
     )
     |> validate_required(~w(reporter_id target_id type sub_type closed)a)
   end

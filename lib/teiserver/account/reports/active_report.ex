@@ -1,6 +1,6 @@
 defmodule Teiserver.Account.ActiveReport do
-  alias Central.Helpers.DatePresets
-  alias Teiserver.{Telemetry}
+  alias Teiserver.Helper.DatePresets
+  alias Teiserver.{Logging}
 
   @spec icon() :: String.t()
   def icon(), do: "fa-regular fa-satellite-dish"
@@ -21,7 +21,7 @@ defmodule Teiserver.Account.ActiveReport do
       )
 
     player_counts =
-      Telemetry.list_server_day_logs(
+      Logging.list_user_activity_day_logs(
         search: [
           start_date: start_date,
           end_date: end_date
@@ -30,7 +30,7 @@ defmodule Teiserver.Account.ActiveReport do
         limit: :infinity
       )
       |> Enum.reduce(%{}, fn log, players_acc ->
-        log.data["minutes_per_user"]["player"]
+        log.data["player"]
         |> Enum.reduce(players_acc, fn {player_id, minutes}, acc ->
           existing = Map.get(acc, player_id, 0)
           Map.put(acc, player_id, existing + minutes)
@@ -63,6 +63,16 @@ defmodule Teiserver.Account.ActiveReport do
       end)
       |> Map.new()
 
+    # If we run this at the start of the month it'll error
+    total_player_count =
+      if Enum.empty?(cumulative_player_counts) do
+        0
+      else
+        cumulative_player_counts
+        |> Map.values()
+        |> Enum.max()
+      end
+
     assigns = %{
       params: params,
       presets: DatePresets.long_ranges()
@@ -71,6 +81,7 @@ defmodule Teiserver.Account.ActiveReport do
     {%{
        player_counts: player_counts,
        cumulative_player_counts: cumulative_player_counts,
+       total_player_count: total_player_count,
        start_date: start_date,
        end_date: end_date
      }, assigns}
@@ -103,6 +114,7 @@ defmodule Teiserver.Account.ActiveReport do
       v < 250 -> 250
       v < 500 -> 500
       v < 1000 -> 1000
+      v < 3000 -> 3000
       true -> nil
     end
   end

@@ -1,10 +1,6 @@
 <% bsname = view_colour() %>
 
-<%= render(
-  TeiserverWeb.Moderation.GeneralView,
-  "sub_menu.html",
-  Map.merge(assigns, %{active: "bans"})
-) %>
+<TeiserverWeb.Moderation.ModerationComponents.sub_menu active="bans" view_colour={view_colour()} />
 
 <script type="text/javascript" charset="utf-8">
   function select_all_keys () {
@@ -122,18 +118,22 @@ type_icons = %{
                       </tr>
                     </thead>
                     <tbody>
-                      <%= for key <- @all_keys do %>
+                      <%= for key <- @all_user_keys do %>
                         <tr>
                           <td>
-                            <i class={"fa-fw fa-regular #{type_icons[key.type.name]} text-#{type_colours[key.type.name]}"}>
-                            </i>
-                            &nbsp; <%= key.type.name %>
+                            <label for={"ban_type_#{key.value}"}>
+                              <i class={"fa-fw fa-regular #{type_icons[key.type.name]} text-#{type_colours[key.type.name]}"}>
+                              </i>
+                              &nbsp; <%= key.type.name %>
+                            </label>
                           </td>
                           <td>
-                            <%= key.value %>
+                            <label for={"ban_type_#{key.value}"}><%= key.value %></label>
                           </td>
                           <td>
-                            <%= date_to_str(key.last_updated, format: :hms_or_ymd) %>
+                            <label for={"ban_type_#{key.value}"}>
+                              <%= date_to_str(key.last_updated, format: :hms_or_ymd) %>
+                            </label>
                           </td>
                           <td>
                             <%= central_component("checkbox",

@@ -1,6 +1,6 @@
 defmodule Teiserver.Account.RetentionReport do
-  alias Central.Helpers.DatePresets
-  alias Teiserver.{Account, Telemetry}
+  alias Teiserver.Helper.DatePresets
+  alias Teiserver.{Account, Logging}
 
   @spec icon() :: String.t()
   def icon(), do: "fa-regular fa-campground"
@@ -34,7 +34,7 @@ defmodule Teiserver.Account.RetentionReport do
     start_datetime = Timex.to_datetime(start_date)
 
     day_logs =
-      Telemetry.list_server_day_logs(
+      Logging.list_user_activity_day_logs(
         search: [start_date: start_date],
         order: "Newest first",
         limit: :infinity
@@ -45,7 +45,7 @@ defmodule Teiserver.Account.RetentionReport do
       Account.list_users(
         search: [
           inserted_after: start_datetime,
-          data_greater_than: {"last_login", "0"},
+          data_greater_than: {"last_login_mins", "0"},
           verified: true
         ],
         limit: :infinity
@@ -59,7 +59,7 @@ defmodule Teiserver.Account.RetentionReport do
           |> Enum.reduce(nil, fn log, acc ->
             case acc do
               nil ->
-                if log.data["minutes_per_user"]["player"][to_string(user.id)] do
+                if log.data["player"][to_string(user.id)] do
                   log.date
                 else
                   nil

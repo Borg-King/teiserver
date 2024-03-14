@@ -5,10 +5,6 @@
     var selected_tab = window.location.hash.substr(1).replace("_tab", "");
     $('#the_tabs a:first').tab('show');
     $('#the_tabs [href="#' + selected_tab + '_tab"]').tab('show');
-
-    page_quick_actions = [
-
-    ];
   });
 </script>
 
@@ -71,6 +67,18 @@
               </a>
             </li>
           <% end %>
+
+          <%= if allow?(@conn, "Server") do %>
+            <li class="nav-item">
+              <a href="#events_tab" role="tab" class="nav-link" data-bs-toggle="tab">
+                <Fontawesome.icon
+                  icon={Teiserver.Telemetry.SimpleMatchEventLib.icon()}
+                  style="regular"
+                /> &nbsp;
+                Events
+              </a>
+            </li>
+          <% end %>
         </ul>
 
         <div class="tab-content">
@@ -89,6 +97,12 @@
 
             <div class="tab-pane" id="balance_tab" style="padding:5px;">
               <%= render("tab_balance.html", assigns) %>
+            </div>
+          <% end %>
+
+          <%= if @rating_logs != %{} and allow?(@conn, "Reviewer") do %>
+            <div class="tab-pane" id="events_tab" style="padding:5px;">
+              <%= render("tab_events.html", assigns) %>
             </div>
           <% end %>
         </div>

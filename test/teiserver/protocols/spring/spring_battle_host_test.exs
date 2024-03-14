@@ -1,10 +1,9 @@
 defmodule Teiserver.SpringBattleHostTest do
-  use Central.ServerCase, async: false
+  use Teiserver.ServerCase, async: false
   require Logger
-  alias Teiserver.{Coordinator, Battle}
-  alias Teiserver.Battle.Lobby
+  alias Teiserver.{Coordinator, Battle, Lobby}
   alias Teiserver.Protocols.Spring
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   import Teiserver.TeiserverTestLib,
     only: [auth_setup: 0, _send_raw: 2, _recv_raw: 1, _recv_until: 1]

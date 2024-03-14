@@ -8,9 +8,9 @@ defmodule Teiserver.Account.PlayerCountExport do
     "start_date" => ""
   })
   """
-  alias Central.Helpers.DatePresets
-  alias Teiserver.{Telemetry}
-  alias Central.Helpers.TimexHelper
+  alias Teiserver.Helper.DatePresets
+  alias Teiserver.Logging
+  alias Teiserver.Helper.TimexHelper
 
   @spec icon() :: String.t()
   def icon(), do: "fa-regular fa-users"
@@ -57,11 +57,11 @@ defmodule Teiserver.Account.PlayerCountExport do
 
     list_func =
       case params["table"] do
-        "Daily" -> &Telemetry.list_server_day_logs/1
-        "Weekly" -> &Telemetry.list_server_week_logs/1
-        "Monthly" -> &Telemetry.list_server_month_logs/1
-        "Quarterly" -> &Telemetry.list_server_quarter_logs/1
-        "Yearly" -> &Telemetry.list_server_year_logs/1
+        "Daily" -> &Logging.list_server_day_logs/1
+        "Weekly" -> &Logging.list_server_week_logs/1
+        "Monthly" -> &Logging.list_server_month_logs/1
+        "Quarterly" -> &Logging.list_server_quarter_logs/1
+        "Yearly" -> &Logging.list_server_year_logs/1
       end
 
     data =
@@ -84,7 +84,7 @@ defmodule Teiserver.Account.PlayerCountExport do
     data
     |> Stream.map(fn log ->
       log.data
-      |> Map.drop(["minutes_per_user"])
+      |> Map.drop(["minutes_per_user", "old_minutes_per_user"])
       |> Map.put("date", log.date)
     end)
     |> Enum.to_list()

@@ -1,7 +1,8 @@
 defmodule Teiserver.Battle.MatchLib do
-  use CentralWeb, :library
+  @moduledoc false
+  use TeiserverWeb, :library
   alias Teiserver.{Battle, Account}
-  alias Teiserver.Battle.Match
+  alias Teiserver.Battle.{Match, MatchMembership}
   alias Teiserver.Data.Types, as: T
   require Logger
 
@@ -41,6 +42,27 @@ defmodule Teiserver.Battle.MatchLib do
       max_team_size == 1 -> "FFA"
       true -> "Team FFA"
     end
+  end
+
+  def list_game_types() do
+    [
+      "Duel",
+      "Team",
+      "FFA",
+      "Team FFA",
+      "Raptors",
+      "Scavengers",
+      "Bots"
+    ]
+  end
+
+  def list_rated_game_types() do
+    [
+      "Duel",
+      "Team",
+      "FFA",
+      "Team FFA"
+    ]
   end
 
   @spec match_from_lobby(T.lobby_id()) :: {map(), [map()]} | nil
@@ -137,7 +159,7 @@ defmodule Teiserver.Battle.MatchLib do
       item_colour: StylingHelper.colours(colours()) |> elem(0),
       item_icon: Teiserver.Battle.MatchLib.icon(),
       item_label: make_match_name(match),
-      url: "/teiserver/battle/matches/#{match.id}"
+      url: "/battle/#{match.id}"
     }
   end
 
@@ -240,6 +262,10 @@ defmodule Teiserver.Battle.MatchLib do
   def _search(query, :queue_id, queue_id) do
     from matches in query,
       where: matches.queue_id == ^queue_id
+  end
+
+  def _search(query, :game_type, "Any type") do
+    query
   end
 
   def _search(query, :game_type, game_type) do
@@ -379,6 +405,50 @@ defmodule Teiserver.Battle.MatchLib do
       where: matches.finished < ^timestamp
   end
 
+  def _search(query, :ally_opponent, {userid, nil, nil}) do
+    from matches in query,
+      join: user_m in MatchMembership,
+      on: user_m.match_id == matches.id and user_m.user_id == ^userid,
+      preload: [members: user_m]
+  end
+
+  def _search(query, :ally_opponent, {userid, nil, opponent_id}) do
+    from matches in query,
+      join: user_m in MatchMembership,
+      on: user_m.match_id == matches.id and user_m.user_id == ^userid,
+      join: opp_m in MatchMembership,
+      on:
+        opp_m.match_id == matches.id and opp_m.user_id == ^opponent_id and
+          opp_m.team_id != user_m.team_id,
+      preload: [members: user_m]
+  end
+
+  def _search(query, :ally_opponent, {userid, ally_id, nil}) do
+    from matches in query,
+      join: user_m in MatchMembership,
+      on: user_m.match_id == matches.id and user_m.user_id == ^userid,
+      join: ally_m in MatchMembership,
+      on:
+        ally_m.match_id == matches.id and ally_m.user_id == ^ally_id and
+          ally_m.team_id == user_m.team_id,
+      preload: [members: user_m]
+  end
+
+  def _search(query, :ally_opponent, {userid, ally_id, opponent_id}) do
+    from matches in query,
+      join: user_m in MatchMembership,
+      on: user_m.match_id == matches.id and user_m.user_id == ^userid,
+      join: ally_m in MatchMembership,
+      on:
+        ally_m.match_id == matches.id and ally_m.user_id == ^ally_id and
+          ally_m.team_id == user_m.team_id,
+      join: opp_m in MatchMembership,
+      on:
+        opp_m.match_id == matches.id and opp_m.user_id == ^opponent_id and
+          opp_m.team_id != user_m.team_id,
+      preload: [members: user_m]
+  end
+
   @spec order_by(Ecto.Query.t(), String.t() | nil) :: Ecto.Query.t()
   def order_by(query, nil), do: query
 
@@ -406,6 +476,7 @@ defmodule Teiserver.Battle.MatchLib do
   def preload(query, nil), do: query
 
   def preload(query, preloads) do
+    query = if :founder in preloads, do: _preload_founders(query), else: query
     query = if :members in preloads, do: _preload_members(query), else: query
     query = if :members_and_users in preloads, do: _preload_members_and_users(query), else: query
 
@@ -413,6 +484,13 @@ defmodule Teiserver.Battle.MatchLib do
 
     query = if :queue in preloads, do: _preload_queue(query), else: query
     query
+  end
+
+  @spec _preload_founders(Ecto.Query.t()) :: Ecto.Query.t()
+  def _preload_founders(query) do
+    from matches in query,
+      left_join: founders in assoc(matches, :founder),
+      preload: [founder: founders]
   end
 
   @spec _preload_members(Ecto.Query.t()) :: Ecto.Query.t()

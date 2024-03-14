@@ -1,10 +1,10 @@
 <div class="row page-row">
   <%= central_component("menu_card",
-    icon: Teiserver.Battle.LobbyLib.icon(),
+    icon: Teiserver.Lobby.icon(),
     name: "lobbies",
     text: "Lobbies",
     icon_class: "fa-duotone",
-    link: ~p"/teiserver/battle/lobbies"
+    link: ~p"/battle/lobbies"
   ) %>
 
   <%= if allow?(@conn, "admin.dev") do %>
@@ -13,7 +13,7 @@
       name: "battle_logs",
       text: "Battle logs",
       icon_class: "fa-duotone",
-      link: ~p"/teiserver/battle/matches"
+      link: ~p"/battle"
     ) %>
   <% end %>
 </div>
@@ -24,6 +24,6 @@
     name: "",
     icon: StylingHelper.icon(:back),
     text: "Back",
-    link: Routes.ts_general_general_path(@conn, :index)
+    link: ~p"/"
   ) %>
 </div>

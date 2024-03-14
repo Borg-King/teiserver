@@ -30,127 +30,119 @@
           class: "btn btn-outline-warning"
         ) %>
       <% end %>
-
-      <%= if assigns[:user] != nil and allow?(@conn, "admin.user") do %>
-        <a
-          href={Routes.admin_user_path(@conn, :edit, @user.id)}
-          class="btn btn-outline-primary"
-          id="section-menu-new"
-        >
-          <i class="fa-regular fa-power-off"></i> &nbsp;
-          Admin edit
-        </a>
-        &nbsp;<br />
-      <% end %>
     </div>
   </div>
 
   <div class="form-group row px-3 py-2">
-    <%= if allow?(@conn, "Server") do %>
-      <div class="col">
-        <h5>Management</h5>
-        <%= for r <- @management_roles do %>
-          <% style = @role_styling_map[r]
+    <div :if={allow?(@conn, "Server")} class="col">
+      <h5>Management</h5>
+      <%= for r <- @management_roles do %>
+        <% style = @role_styling_map[r]
 
-          label =
-            if style do
-              raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
-            else
-              r
-            end %>
-          <%= central_component("checkbox",
-            id: "user_#{r}",
-            name: "user[#{r}]",
-            label: label,
-            checked: r in (@changeset.data.data["roles"] || [])
-          ) %>
-        <% end %>
-      </div>
-    <% end %>
+        label =
+          if style do
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
+          else
+            r
+          end %>
+        <%= central_component("checkbox",
+          id: "user_#{r}",
+          name: "user[#{r}]",
+          label: label,
+          checked: r in (@changeset.data.roles || [])
+        ) %>
+      <% end %>
+    </div>
 
-    <%= if allow?(@conn, "Admin") do %>
-      <div class="col">
-        <h5>Moderation</h5>
-        <%= for r <- @moderation_roles do %>
-          <% style = @role_styling_map[r]
+    <div :if={allow?(@conn, "Admin")} class="col">
+      <h5>Moderation</h5>
+      <%= for r <- @moderation_roles do %>
+        <% style = @role_styling_map[r]
 
-          label =
-            if style do
-              raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
-            else
-              r
-            end %>
-          <%= central_component("checkbox",
-            id: "user_#{r}",
-            name: "user[#{r}]",
-            label: label,
-            checked: r in (@changeset.data.data["roles"] || [])
-          ) %>
-        <% end %>
-      </div>
-    <% end %>
+        label =
+          if style do
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
+          else
+            r
+          end %>
+        <%= central_component("checkbox",
+          id: "user_#{r}",
+          name: "user[#{r}]",
+          label: label,
+          checked: r in (@changeset.data.roles || [])
+        ) %>
+      <% end %>
+    </div>
 
-    <%= if allow?(@conn, "Admin") do %>
-      <div class="col">
-        <h5>Staff</h5>
-        <%= for r <- @staff_roles do %>
-          <% style = @role_styling_map[r]
+    <div :if={allow?(@conn, "Admin")} class="col">
+      <h5>Staff</h5>
+      <%= for r <- @staff_roles do %>
+        <% style = @role_styling_map[r]
 
-          label =
-            if style do
-              raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
-            else
-              r
-            end %>
-          <%= central_component("checkbox",
-            id: "user_#{r}",
-            name: "user[#{r}]",
-            label: label,
-            checked: r in (@changeset.data.data["roles"] || [])
-          ) %>
-        <% end %>
-      </div>
+        label =
+          if style do
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
+          else
+            r
+          end %>
+        <%= central_component("checkbox",
+          id: "user_#{r}",
+          name: "user[#{r}]",
+          label: label,
+          checked: r in (@changeset.data.roles || [])
+        ) %>
+      <% end %>
+    </div>
 
-      <div class="col">
-        <h5>Community</h5>
-        <%= for r <- @community_roles do %>
-          <% style = @role_styling_map[r]
+    <div :if={allow?(@conn, "Admin")} class="col">
+      <h5>Community</h5>
+      <%= for r <- @community_roles do %>
+        <% style = @role_styling_map[r]
 
-          label =
-            if style do
-              raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
-            else
-              r
-            end %>
-          <%= central_component("checkbox",
-            id: "user_#{r}",
-            name: "user[#{r}]",
-            label: label,
-            checked: r in (@changeset.data.data["roles"] || [])
-          ) %>
-        <% end %>
-      </div>
+        label =
+          if style do
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
+          else
+            r
+          end %>
+        <%= central_component("checkbox",
+          id: "user_#{r}",
+          name: "user[#{r}]",
+          label: label,
+          checked: r in (@changeset.data.roles || [])
+        ) %>
+      <% end %>
+    </div>
 
-      <div class="col">
-        <h5>Privileged</h5>
-        <%= for r <- @privileged_roles do %>
-          <% style = @role_styling_map[r]
+    <div :if={allow?(@conn, "Admin")} class="col">
+      <h5>Privileged</h5>
+      <%= for r <- @privileged_roles do %>
+        <% style = @role_styling_map[r]
 
-          label =
-            if style do
-              raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
-            else
-              r
-            end %>
-          <%= central_component("checkbox",
-            id: "user_#{r}",
-            name: "user[#{r}]",
-            label: label,
-            checked: r in (@changeset.data.data["roles"] || [])
-          ) %>
-        <% end %>
-      </div>
-    <% end %>
+        label =
+          if style do
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
+          else
+            r
+          end %>
+        <%= central_component("checkbox",
+          id: "user_#{r}",
+          name: "user[#{r}]",
+          label: label,
+          checked: r in (@changeset.data.roles || [])
+        ) %>
+      <% end %>
+    </div>
 
     <div class="col">
       <h5>Property</h5>
@@ -159,7 +151,9 @@
 
         label =
           if style do
-            raw("<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}")
+            raw(
+              "<i class='fa-fw #{style[:icon]}' style='color: #{style[:colour]}'></i> &nbsp;#{r}"
+            )
           else
             r
           end %>
@@ -167,20 +161,40 @@
           id: "user_#{r}",
           name: "user[#{r}]",
           label: label,
-          checked: r in (@changeset.data.data["roles"] || [])
+          checked: r in (@changeset.data.roles || [])
         ) %>
       <% end %>
     </div>
   </div>
 
-  <hr />
+  <div :if={allow?(@conn, "Admin")} class="row mt-2">
+    <div class="col">
+      <%= input_with_type(f, :colour, "color") %>
+    </div>
 
-  <div class="form-group m-2">
-    <%= input_with_type(f, :colour, "color") %>
+    <div class="col">
+      <%= central_component("fa5_icon_picker", %{form: f, field: :icon}) %>
+    </div>
   </div>
 
-  <div class="form-group m-2">
-    <%= central_component("fa5_icon_picker", %{form: f, field: :icon}) %>
+  <div :if={allow?(@conn, "Server")} class="row mt-2">
+    <div class="col">
+      <%= label(f, :behaviour_score, class: "control-label") %>
+      <%= text_input(f, :behaviour_score, class: "form-control") %>
+      <%= error_tag(f, :behaviour_score) %>
+    </div>
+
+    <div class="col">
+      <%= label(f, :trust_score, class: "control-label") %>
+      <%= text_input(f, :trust_score, class: "form-control") %>
+      <%= error_tag(f, :trust_score) %>
+    </div>
+
+    <div class="col">
+      <%= label(f, :social_score, class: "control-label") %>
+      <%= text_input(f, :social_score, class: "form-control") %>
+      <%= error_tag(f, :social_score) %>
+    </div>
   </div>
 
   <div class="form-group m-2 my-4">

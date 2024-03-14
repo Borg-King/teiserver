@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.Infologs do
+defmodule Teiserver.Repo.Migrations.Infologs do
   use Ecto.Migration
 
   def change do
@@ -10,6 +10,7 @@ defmodule Central.Repo.Migrations.Infologs do
       add :log_type, :string
       add :metadata, :jsonb
       add :contents, :text
+      add :size, :integer
     end
   end
 end

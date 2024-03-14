@@ -4,8 +4,8 @@ defmodule Teiserver.Game do
   """
 
   import Ecto.Query, warn: false
-  alias Central.Helpers.QueryHelpers
-  alias Central.Repo
+  alias Teiserver.Helper.QueryHelpers
+  alias Teiserver.Repo
 
   alias Teiserver.Game.{Queue, QueueLib}
 
@@ -21,7 +21,7 @@ defmodule Teiserver.Game do
     |> QueueLib.search(args[:search])
     |> QueueLib.preload(args[:preload])
     |> QueueLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -182,7 +182,7 @@ defmodule Teiserver.Game do
     |> AchievementTypeLib.search(args[:search])
     |> AchievementTypeLib.preload(args[:preload])
     |> AchievementTypeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -339,7 +339,7 @@ defmodule Teiserver.Game do
     |> UserAchievementLib.search(args[:search])
     |> UserAchievementLib.preload(args[:preload])
     |> UserAchievementLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -486,7 +486,7 @@ defmodule Teiserver.Game do
     |> RatingTypeLib.search(args[:search])
     |> RatingTypeLib.preload(args[:preload])
     |> RatingTypeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -540,7 +540,7 @@ defmodule Teiserver.Game do
   def get_or_add_rating_type(name) do
     name = String.trim(name)
 
-    Central.cache_get_or_store(:teiserver_game_rating_types, name, fn ->
+    Teiserver.cache_get_or_store(:teiserver_game_rating_types, name, fn ->
       case list_rating_types(search: [name: name], select: [:id], order_by: "ID (Lowest first)") do
         [] ->
           {:ok, rating_type} =
@@ -664,7 +664,7 @@ defmodule Teiserver.Game do
     |> RatingLogLib.search(args[:search])
     |> RatingLogLib.preload(args[:preload])
     |> RatingLogLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -818,7 +818,7 @@ defmodule Teiserver.Game do
     |> LobbyPolicyLib.search(args[:search])
     |> LobbyPolicyLib.preload(args[:preload])
     |> LobbyPolicyLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """

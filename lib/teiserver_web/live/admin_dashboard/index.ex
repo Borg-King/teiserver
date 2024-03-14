@@ -7,19 +7,31 @@ defmodule TeiserverWeb.AdminDashLive.Index do
   alias Teiserver.Account.AccoladeLib
   alias Teiserver.Data.Matchmaking
 
+  @empty_telemetry_data %{
+    client: %{
+      total: 0,
+      player: 0,
+      spectator: 0
+    },
+    battle: %{
+      total: 0,
+      in_progress: 0
+    },
+    total_clients_connected: 0
+  }
+
   @impl true
   def mount(_params, session, socket) do
-    telemetry_data = Central.cache_get(:application_temp_cache, :telemetry_data)
+    telemetry_data =
+      Teiserver.cache_get(:application_temp_cache, :telemetry_data) || @empty_telemetry_data
 
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
       |> add_breadcrumb(name: "Admin", url: "/teiserver/admin")
       |> add_breadcrumb(name: "Dashboard", url: "/admin/dashboard")
-      |> assign(:site_menu_active, "teiserver_admin")
-      |> assign(:view_colour, Central.Admin.AdminLib.colours())
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
+      |> assign(:site_menu_active, "admin")
+      |> assign(:view_colour, Teiserver.Admin.AdminLib.colours())
       |> assign(:telemetry_client, telemetry_data.client)
       |> assign(:telemetry_battle, telemetry_data.battle)
       |> assign(:total_connected_clients, telemetry_data.total_clients_connected)
@@ -30,7 +42,7 @@ defmodule TeiserverWeb.AdminDashLive.Index do
 
     :timer.send_interval(5_000, :tick)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -42,7 +54,7 @@ defmodule TeiserverWeb.AdminDashLive.Index do
       false ->
         {:noreply,
          socket
-         |> redirect(to: Routes.general_page_path(socket, :index))}
+         |> redirect(to: ~p"/")}
     end
   end
 
@@ -164,7 +176,8 @@ defmodule TeiserverWeb.AdminDashLive.Index do
       {"Lobby ID server", lobby_id_server_pid},
       {"Coordinator", Coordinator.get_coordinator_pid()},
       {"Accolades", AccoladeLib.get_accolade_bot_pid()},
-      {"Match Monitor", Teiserver.Battle.MatchMonitorServer.get_match_monitor_pid()}
+      {"Match Monitor", Teiserver.Battle.MatchMonitorServer.get_match_monitor_pid()},
+      {"Automod", Teiserver.Coordinator.AutomodServer.get_automod_pid()}
     ]
 
     socket
@@ -172,7 +185,7 @@ defmodule TeiserverWeb.AdminDashLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_telemetry")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_telemetry")
 
     socket
     |> assign(:page_title, "Admin dashboard")

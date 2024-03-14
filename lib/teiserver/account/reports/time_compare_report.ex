@@ -1,7 +1,7 @@
 defmodule Teiserver.Account.TimeCompareReport do
-  alias Teiserver.{Telemetry, Account}
-  alias Central.Helpers.TimexHelper
-  import Central.Helpers.StringHelper, only: [get_hash_id: 1]
+  alias Teiserver.{Logging, Account}
+  alias Teiserver.Helper.TimexHelper
+  import Teiserver.Helper.StringHelper, only: [get_hash_id: 1]
 
   @spec icon() :: String.t()
   def icon(), do: "fa-regular fa-code-compare"
@@ -108,7 +108,7 @@ defmodule Teiserver.Account.TimeCompareReport do
     user_ids = get_user_ids(params)
 
     logs =
-      Telemetry.list_server_minute_logs(
+      Logging.list_server_minute_logs(
         search: [
           start_timestamp: start_date,
           end_timestamp: end_date

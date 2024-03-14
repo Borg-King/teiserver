@@ -1,19 +1,19 @@
 defmodule TeiserverWeb.Admin.SiteConfigController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Config
 
   plug Bodyguard.Plug.Authorize,
-    policy: Central.Dev,
+    policy: Teiserver.Auth.Server,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   # plug :add_breadcrumb, name: 'Alacrity', url: '/'
-  plug :add_breadcrumb, name: 'Admin', url: '/admin'
+  plug :add_breadcrumb, name: 'Admin', url: '/teiserver/admin'
   plug :add_breadcrumb, name: 'Site config', url: '/config/site'
 
   plug(AssignPlug,
-    site_menu_active: "teiserver_admin",
+    site_menu_active: "admin",
     sub_menu_active: "config"
   )
 
@@ -46,7 +46,7 @@ defmodule TeiserverWeb.Admin.SiteConfigController do
     tab =
       Config.get_site_config_type(key)
       |> Map.get(:section)
-      |> Central.Helpers.StringHelper.remove_spaces()
+      |> Teiserver.Helper.StringHelper.remove_spaces()
 
     add_audit_log(conn, "Site config:Update value", %{key: key, value: value})
 

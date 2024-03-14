@@ -5,16 +5,13 @@
     var selected_tab = window.location.hash.substr(1).replace("_tab", "");
     $('#the_tabs a:first').tab('show');
     $('#the_tabs [href="#' + selected_tab + '_tab"]').tab('show');
-
-    page_quick_actions = [];
   });
 </script>
 
-<%= render(
-  TeiserverWeb.Moderation.GeneralView,
-  "sub_menu.html",
-  Map.merge(assigns, %{active: "reports"})
-) %>
+<TeiserverWeb.Moderation.ModerationComponents.sub_menu
+  active="reports"
+  view_colour={view_colour()}
+/>
 
 <div class="row section-menu">
   <div class="col-md-12">
@@ -31,10 +28,7 @@
         <hr />
 
         <div class="float-end">
-          <a
-            class={"btn btn-outline-#{bsname}"}
-            href={Routes.moderation_report_form_path(@conn, :index, @user.id)}
-          >
+          <a class={"btn btn-outline-#{bsname}"} href={~p"/moderation/report_user/#{@user.id}"}>
             <%= central_component("icon", icon: icon(), class: "fa-solid") %> &nbsp;
             Report form
           </a>
@@ -83,7 +77,6 @@
             icon_class: "fa-solid"
           ) %>
         </h3>
-        Previous names: <%= Enum.join(@stats["previous_names"] || [], ", ") %>
 
         <ul class="nav nav-tabs" role="tablist" id="the_tabs">
           <li class="nav-item" role="presentation">
@@ -110,6 +103,13 @@
               ) %> Actions (<%= Enum.count(@actions) %>)
             </a>
           </li>
+
+          <li class="nav-item" role="presentation">
+            <a href="#user_details_tab" role="tab" class="nav-link" data-bs-toggle="tab">
+              <Fontawesome.icon icon={Teiserver.Account.UserLib.icon()} style="regular" />
+              User details
+            </a>
+          </li>
         </ul>
 
         <div class="tab-content">
@@ -123,6 +123,10 @@
 
           <div class="tab-pane" id="actions_tab" style="padding:5px;">
             <%= render("tab_actions.html", assigns) %>
+          </div>
+
+          <div class="tab-pane" id="user_details_tab" style="padding:5px;">
+            <%= render("tab_user_details.html", assigns) %>
           </div>
         </div>
       </div>

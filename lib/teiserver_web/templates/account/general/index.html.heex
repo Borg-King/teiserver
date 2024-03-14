@@ -4,7 +4,7 @@
     name: "profile",
     icon: "fa-solid fa-user-circle",
     text: "My profile",
-    link: Routes.ts_account_profile_path(@conn, :show, @conn.current_user.id)
+    link: ~p"/profile"
   ) %>
 
   <%= central_component("menu_card",
@@ -12,23 +12,7 @@
     name: "",
     icon: Teiserver.icon(:relationship),
     text: "Friends/Mutes/Invites",
-    link: Routes.ts_account_relationships_path(@conn, :index)
-  ) %>
-
-  <%= central_component("menu_card",
-    icon_class: "fa-duotone",
-    name: "appearance",
-    icon: "fa-solid fa-icons",
-    text: "Appearance",
-    link: Routes.ts_account_general_path(@conn, :customisation_form)
-  ) %>
-
-  <%= central_component("menu_card",
-    icon_class: "fa-duotone",
-    name: "clans",
-    icon: Teiserver.Clans.ClanLib.icon(),
-    text: "Clans",
-    link: ~p"/teiserver/clans"
+    link: ~p"/account/relationship"
   ) %>
 
   <%= central_component("menu_card",
@@ -36,11 +20,11 @@
     name: "",
     icon: Teiserver.Config.UserConfigLib.icon(),
     text: "Preferences",
-    link: Routes.ts_account_preferences_path(@conn, :index)
+    link: ~p"/account/settings"
   ) %>
 
   <%= central_component("menu_card",
-    icon: Central.Account.icon(),
+    icon: Teiserver.Account.icon(),
     text: "Account details",
     icon_class: "fa-duotone",
     link: Routes.ts_account_general_path(@conn, :edit_details)
@@ -60,6 +44,6 @@
     name: "",
     icon: StylingHelper.icon(:back),
     text: "Back",
-    link: Routes.ts_general_general_path(@conn, :index)
+    link: ~p"/"
   ) %>
 </div>

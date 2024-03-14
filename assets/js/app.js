@@ -28,15 +28,6 @@ import topbar from "../vendor/topbar"
 
 // Local files
 import socket from "./socket"
-import LiveSearch from "./live_search"
-import CommunicationNotification from "./communication_notification"
-import FP from "./fp"
-
-$(function () {
-  LiveSearch.init(socket);
-  CommunicationNotification.init(socket);
-  FP.init(socket);
-});
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, { params: { _csrf_token: csrfToken } })

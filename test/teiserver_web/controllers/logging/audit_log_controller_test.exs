@@ -1,5 +1,5 @@
 defmodule TeiserverWeb.Logging.AuditLogControllerTest do
-  use CentralWeb.ConnCase, async: true
+  use TeiserverWeb.ConnCase, async: true
 
   # alias TeiserverWeb.Logging.AuditLog
   alias Teiserver.Logging.Helpers
@@ -25,7 +25,7 @@ defmodule TeiserverWeb.Logging.AuditLogControllerTest do
         search: %{
           name: "Test",
           action: "Bedrock object import",
-          central_user: "##{user.id}"
+          teiserver_user: "##{user.id}"
         }
       )
 
@@ -38,7 +38,7 @@ defmodule TeiserverWeb.Logging.AuditLogControllerTest do
         search: %{
           name: "",
           action: "All",
-          central_user: ""
+          teiserver_user: ""
         }
       )
 

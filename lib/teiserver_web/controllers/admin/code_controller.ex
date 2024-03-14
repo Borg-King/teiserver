@@ -1,5 +1,5 @@
 defmodule TeiserverWeb.Admin.CodeController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Account
   alias Teiserver.Account.{Code, CodeLib}
@@ -7,15 +7,15 @@ defmodule TeiserverWeb.Admin.CodeController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Account.Code,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
-    site_menu_active: "central_admin",
+    site_menu_active: "teiservercentral_admin",
     sub_menu_active: "code"
   )
 
-  plug :add_breadcrumb, name: 'Account', url: '/central'
-  plug :add_breadcrumb, name: 'Codes', url: '/central/codes'
+  plug :add_breadcrumb, name: 'Admin', url: '/teiserver/admin'
+  plug :add_breadcrumb, name: 'Codes', url: '/teiserver/admin/codes'
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def index(conn, params) do
@@ -62,7 +62,7 @@ defmodule TeiserverWeb.Admin.CodeController do
   def create(conn, %{"code" => code_params}) do
     code_params =
       Map.merge(code_params, %{
-        "user_id" => conn.current_user.id
+        "user_id" => conn.assigns.current_user.id
       })
 
     case Account.create_code(code_params) do

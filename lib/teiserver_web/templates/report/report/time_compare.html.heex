@@ -7,7 +7,7 @@
 ) %>
 
 <%= central_component("picker_script",
-  module: Central.Account.UserLib,
+  module: Teiserver.Account.UserLib,
   name: "account_user",
   title: "User search"
 ) %>
@@ -53,7 +53,7 @@
       <div class="card-body">
         <div
           class="btn btn-primary2 float-end"
-          onclick="$('.help-box, .help-box-large').toggle();"
+          onclick="$('.old-help-box, .old-help-box-large').toggle();"
         >
           <i class="fa-fw fa-solid fa-circle-info"></i> &nbsp;
           Show/Hide help
@@ -151,7 +151,7 @@
                 <label for={"search_account_user#{i}"} class="control-label">
                   User <%= i %>:
                 </label>
-                <%= render(CentralWeb.Account.UserView, "picker.html",
+                <%= render(TeiserverWeb.Account.UserView, "picker.html",
                   input_name: "report[account_user#{i}]",
                   input_id: "report_account_user#{i}",
                   value: @params["account_user#{i}"]
@@ -193,19 +193,6 @@
                 description: ""
               ) %>
             </div>
-            <!--
-            <div class="col-md-3 col-xl-2 search-form-input">
-              <label for="report_tabular" class="control-label">Tabular data:</label>
-              <%= central_component "checkbox",
-                name: "report[tabular]",
-                id: "report_tabular",
-                value: "true",
-                label: "Show a week of tabular data",
-                checked: @params["tabular"] == "true",
-
-                description: "" %>
-            </div>
-          -->
           </div>
 
           <div class="row">
@@ -221,7 +208,7 @@
           </div>
         </form>
 
-        <div class="help-box-large"></div>
+        <div class="old-help-box-large"></div>
 
         <%= if @params["tabular"] != "true" do %>
           <div id="chart" class="with-transitions mt-3" style="height: 400px;"></div>

@@ -10,14 +10,15 @@ defmodule Teiserver.Tachyon.TachyonSocket do
   # alias Teiserver.Tachyon.Socket.PubsubHandlers
   alias Teiserver.Data.Types, as: T
 
-  @spec child_spec(any) :: any()
+  @spec child_spec(any) :: :ignore
   def child_spec(_opts) do
     # We won't spawn any process, so let's return a dummy task
     # %{id: __MODULE__, start: {Task, :start_link, [fn -> :ok end]}, restart: :transient}
     :ignore
   end
 
-  @spec connect(T.tachyon_ws_state()) :: {:ok, T.tachyon_ws_state()} | :error
+  @spec connect(map()) ::
+          {:ok, T.tachyon_ws_state()} | {:error, atom | String.t()}
   def connect(
         %{
           params: %{
@@ -60,14 +61,16 @@ defmodule Teiserver.Tachyon.TachyonSocket do
       |> Enum.reject(fn key -> Map.has_key?(params, key) end)
       |> Enum.join(", ")
 
-    {:error, {:missing_params, missing}}
+    {:error, "missing_params: #{missing}"}
   end
 
   @spec init(T.tachyon_ws_state()) :: {:ok, T.tachyon_ws_state()}
   def init(%{conn: %{userid: userid}} = state) do
+    :timer.send_after(1500, :connect_to_client)
+
     Logger.metadata(request_id: "TachyonWSServer##{userid}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_client_messages:#{userid}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_client_messages:#{userid}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_server")
 
     {:ok, state}
   end
@@ -91,10 +94,13 @@ defmodule Teiserver.Tachyon.TachyonSocket do
     end
   end
 
+  # We currently don't have compression but if/when we do it will be tracked in the conn
+  # so it goes here
   defp decompress_message(text, _conn) do
     {:ok, text}
   end
 
+  @spec decode_message(String.t(), T.tachyon_conn()) :: {:ok, map()} | {:json_error, String.t()}
   defp decode_message(text, _conn) do
     case Jason.decode(text) do
       {:ok, msg} -> {:ok, msg}
@@ -106,22 +112,33 @@ defmodule Teiserver.Tachyon.TachyonSocket do
     object = wrapper["data"]
     meta = Map.drop(wrapper, ["data"])
 
-    {dispatch_response, new_conn} = try do
-      CommandDispatch.dispatch(conn, object, meta)
-    rescue
-      _e in FunctionClauseError ->
-        send(self(), :disconnect_on_error)
-        response = ErrorResponse.generate("Server FunctionClauseError for command #{meta["command"]}")
-        {response, conn}
+    {dispatch_response, new_conn} =
+      try do
+        CommandDispatch.dispatch(conn, object, meta)
+      rescue
+        e in FunctionClauseError ->
+          handle_error(e, __STACKTRACE__, conn)
 
-      # e in RuntimeError ->
-      #   raise e
+          send(self(), :disconnect_on_error)
 
-      _ ->
-        send(self(), :disconnect_on_error)
-        response = ErrorResponse.generate("Internal server error for command #{meta["command"]}")
-        {response, conn}
-    end
+          response =
+            ErrorResponse.generate("Server FunctionClauseError for command #{meta["command"]}")
+
+          {response, conn}
+
+        # e in RuntimeError ->
+        #   raise e
+
+        e ->
+          handle_error(e, __STACKTRACE__, conn)
+
+          send(self(), :disconnect_on_error)
+
+          response =
+            ErrorResponse.generate("Internal server error for command #{meta["command"]}")
+
+          {response, conn}
+      end
 
     response =
       case dispatch_response do
@@ -160,7 +177,18 @@ defmodule Teiserver.Tachyon.TachyonSocket do
 
   @spec handle_info(any, T.tachyon_ws_state()) ::
           {:reply, :ok, {:binary, binary}, T.tachyon_ws_state()}
+  def handle_info(:connect_to_client, state) do
+    Account.cast_client(state.conn.userid, {:update_tcp_pid, self()})
+    {:ok, state}
+  end
+
+  # Holdover from Spring stuff, discard message for now
+  def handle_info({:request_user_join_lobby, _}, state) do
+    {:ok, state}
+  end
+
   def handle_info(%{channel: channel} = msg, state) do
+    # First we find the module to handle this message, we have one module per channel
     module =
       case channel do
         "teiserver_lobby_host_message" <> _ ->
@@ -172,19 +200,41 @@ defmodule Teiserver.Tachyon.TachyonSocket do
         "teiserver_lobby_updates" <> _ ->
           MessageHandlers.LobbyUpdateMessageHandlers
 
+        "teiserver_lobby_chat" <> _ ->
+          MessageHandlers.LobbyChatMessageHandlers
+
         _ ->
           raise "No handler for messages to channel #{msg.channel}"
       end
 
-    case module.handle(msg, state) do
-      nil ->
-        {:ok, state}
+    # Now we get the module to try and handle it
+    try do
+      case module.handle(msg, state.conn) do
+        nil ->
+          {:ok, state}
 
-      {:ok, new_state} ->
-        {:ok, new_state}
+        {:ok, new_conn} ->
+          {:ok, %{state | conn: new_conn}}
 
-      {:ok, resp, new_state} ->
-        {:reply, :ok, {:text, resp |> Jason.encode!()}, new_state}
+        {:ok, resp, new_conn} ->
+          {:reply, :ok, {:text, resp |> Jason.encode!()}, %{state | conn: new_conn}}
+      end
+    rescue
+      e ->
+        handle_error(e, __STACKTRACE__, state.conn)
+
+        send(self(), :disconnect_on_error)
+
+        {command, _, reason} =
+          ErrorResponse.generate("Internal server error for internal channel #{channel}")
+
+        response = %{
+          "command" => command,
+          "status" => "failure",
+          "reason" => reason
+        }
+
+        {:reply, :ok, {:text, response |> Jason.encode!()}, state}
     end
   end
 
@@ -210,6 +260,16 @@ defmodule Teiserver.Tachyon.TachyonSocket do
     # {:reply, :ok, {:binary, <<111>>}, state}
   end
 
+  defp handle_error(error, stacktrace, _conn) do
+    spawn(fn ->
+      reraise error, stacktrace
+    end)
+
+    # Logger.error("EEEEE")
+
+    # reraise error, stacktrace
+  end
+
   @spec terminate(any, any) :: :ok
   def terminate({:error, :closed}, %{conn: %{userid: userid}} = _state) do
     Teiserver.Client.disconnect(userid, "connection closed by client")
@@ -226,7 +286,7 @@ defmodule Teiserver.Tachyon.TachyonSocket do
   end
 
   defp login(%{user: _user, expires: _expires} = token, state) do
-    response = Teiserver.User.login_from_token(token, state)
+    response = Teiserver.CacheUser.login_from_token(token, state)
 
     case response do
       {:ok, user} ->
@@ -240,22 +300,22 @@ defmodule Teiserver.Tachyon.TachyonSocket do
     end
   end
 
-  @spec new_conn(Central.Account.User.t()) :: map()
+  @spec new_conn(Teiserver.Account.User.t()) :: map()
   defp new_conn(user) do
-    # exempt_from_cmd_throttle = user.moderator == true or User.is_bot?(user) == true
     exempt_from_cmd_throttle = true
 
     %{
       # Client state
       userid: user.id,
       username: user.name,
-      lobby_host: false,
       queues: [],
       lobby_id: nil,
+      lobby_host: false,
       party_id: nil,
       party_role: nil,
       exempt_from_cmd_throttle: exempt_from_cmd_throttle,
       cmd_timestamps: [],
+      error_handle: :raise,
 
       # Caching app configs
       flood_rate_limit_count:
@@ -268,10 +328,20 @@ defmodule Teiserver.Tachyon.TachyonSocket do
   def handle_error(conn, {:missing_params, param}),
     do: Plug.Conn.send_resp(conn, 400, "Missing parameter(s): #{param}")
 
+  def handle_error(conn, "missing_params: " <> param),
+    do: Plug.Conn.send_resp(conn, 400, "Missing parameter(s): #{param}")
+
   def handle_error(conn, :no_user), do: Plug.Conn.send_resp(conn, 401, "Unauthorized")
   def handle_error(conn, :failed_login), do: Plug.Conn.send_resp(conn, 403, "Forbidden")
   def handle_error(conn, :rate_limit), do: Plug.Conn.send_resp(conn, 429, "Too many requests")
 
   def handle_error(conn, :unexpected_value),
     do: Plug.Conn.send_resp(conn, 500, "Internal server error")
+
+  # Uncomment when we have an error we need to print out
+  # def handle_error(conn, error) do
+  #   raise "Unexpected error of #{inspect(error)}"
+
+  #   Plug.Conn.send_resp(conn, 500, "Internal server error")
+  # end
 end

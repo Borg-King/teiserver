@@ -5,29 +5,23 @@
     var selected_tab = window.location.hash.substr(1).replace("_tab", "");
     $('#the_tabs a:first').tab('show');
     $('#the_tabs [href="#' + selected_tab + '_tab"]').tab('show');
-
-    page_quick_actions = [];
   });
 </script>
 
-<%= render(
-  TeiserverWeb.Moderation.GeneralView,
-  "sub_menu.html",
-  Map.merge(assigns, %{active: "reports"})
-) %>
+<TeiserverWeb.Moderation.ModerationComponents.sub_menu
+  active="reports"
+  view_colour={view_colour()}
+/>
 
 <div class="row section-menu">
   <div class="col-md-12">
     <div class={"card border-#{bsname}"}>
       <div class="card-body">
-        <%= render(
-          TeiserverWeb.Moderation.ReportView,
-          "section_menu.html",
-          Map.merge(assigns, %{
-            show_search: false,
-            active: "show"
-          })
-        ) %>
+        <TeiserverWeb.Moderation.ReportComponents.section_menu
+          active="show"
+          view_colour={view_colour()}
+          current_user={@current_user}
+        />
         <hr />
 
         <div class="float-end">
@@ -49,7 +43,6 @@
             <% end %>
           <% end %>
 
-
           <a
             class="btn btn-outline-warning"
             href={"#{Routes.moderation_report_path(@conn, :index)}?target_id=#{@report.target_id}"}
@@ -69,7 +62,7 @@
           <%= if allow?(@conn, "Moderator") do %>
             <a
               class={"btn btn-outline-#{Teiserver.Account.UserLib.colour()}"}
-              href={~p"/teiserver/admin/users/full_chat/#{@report.target_id}"}
+              href={~p"/admin/chat?userid=#{@report.target_id}"}
             >
               <%= central_component("icon",
                 icon: Teiserver.Chat.LobbyMessageLib.icon(),

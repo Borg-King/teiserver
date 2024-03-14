@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.AddCommunicationTextCallbacks do
+defmodule Teiserver.Repo.Migrations.AddCommunicationTextCallbacks do
   use Ecto.Migration
 
   def change do
@@ -14,6 +14,7 @@ defmodule Central.Repo.Migrations.AddCommunicationTextCallbacks do
       add :response, :text
 
       add :rules, :jsonb
+      add :last_triggered, :jsonb
 
       timestamps()
     end

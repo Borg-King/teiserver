@@ -1,10 +1,10 @@
 defmodule Teiserver.Coordinator.ConsulCommandsTest do
-  use Central.ServerCase, async: false
-  alias Teiserver.Battle.Lobby
+  @moduledoc false
+  use Teiserver.ServerCase, async: false
   alias Teiserver.Account.ClientLib
   alias Teiserver.Common.PubsubListener
   alias Teiserver.Game.MatchRatingLib
-  alias Teiserver.{Account, Battle, User, Client, Coordinator}
+  alias Teiserver.{Account, Battle, CacheUser, Client, Coordinator, Lobby}
   alias Teiserver.Coordinator.ConsulServer
 
   import Teiserver.TeiserverTestLib,
@@ -16,7 +16,7 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
     %{socket: psocket, user: player} = tachyon_auth_setup()
 
     # User needs to be a moderator (at this time) to start/stop Coordinator mode
-    User.update_user(%{host | moderator: true})
+    CacheUser.update_user(%{host | roles: ["Moderator"]})
     ClientLib.refresh_client(host.id)
 
     lobby_data = %{
@@ -844,7 +844,7 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
   end
 
   test "rename", %{lobby_id: lobby_id, hsocket: hsocket, host: host} do
-    data = %{cmd: "c.lobby.message", message: "$rename New Lobby Name::?  "}
+    data = %{cmd: "c.lobby.message", message: "$rename New Lobby Name  "}
     _tachyon_send(hsocket, data)
 
     [reply] = _tachyon_recv(hsocket)
@@ -853,7 +853,7 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
              "cmd" => "s.lobby.update_values",
              "lobby_id" => lobby_id,
              "new_values" => %{
-               "name" => "New Lobby Name::?"
+               "name" => "New Lobby Name"
              }
            }
 
@@ -861,12 +861,12 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
 
     assert reply == %{
              "cmd" => "s.lobby.say",
-             "message" => "$rename New Lobby Name::?",
+             "message" => "$rename New Lobby Name",
              "sender_id" => host.id,
              "lobby_id" => lobby_id
            }
 
-    assert Battle.get_lobby(lobby_id).name == "New Lobby Name::?"
+    assert Battle.get_lobby(lobby_id).name == "New Lobby Name"
   end
 
   test "password? weth no password", %{lobby_id: lobby_id, hsocket: hsocket} do
@@ -1144,7 +1144,7 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
 
     # Add the players
     %{user: player1, socket: socket1} = tachyon_auth_setup()
-    User.add_roles(player1.id, ["VIP", "Streamer"])
+    CacheUser.add_roles(player1.id, ["VIP", "Streamer"])
 
     %{user: player2, socket: socket2} = tachyon_auth_setup()
     %{user: player3, socket: socket3} = tachyon_auth_setup()
@@ -1189,9 +1189,9 @@ defmodule Teiserver.Coordinator.ConsulCommandsTest do
     assert Account.get_client_by_id(player8.id).player == false
     assert Account.get_client_by_id(player9.id).player == false
 
-    player_list =
-      Teiserver.Coordinator.ConsulServer.list_players(%{lobby_id: lobby_id})
-      |> Enum.map(fn %{userid: userid} -> userid end)
+    # player_list =
+    #   Teiserver.Coordinator.ConsulServer.list_players(%{lobby_id: lobby_id})
+    #   |> Enum.map(fn %{userid: userid} -> userid end)
 
     # Queue should be empty at start
     queue = Coordinator.call_consul(lobby_id, {:get, :join_queue})

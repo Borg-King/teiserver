@@ -1,22 +1,24 @@
 <% bsname = view_colour() %>
 
-<%= central_component("section_menu_button",
-  name: "list",
-  label: "List",
-  active: @active,
-  icon: "fa-regular fa-bars",
-  bsname: bsname,
-  url: Routes.ts_admin_match_path(@conn, :index)
-) %>
+<%= if allow?(@conn, "Reviewer") do %>
+  <%= central_component("section_menu_button",
+    name: "list",
+    label: "List",
+    active: @active,
+    icon: "fa-regular fa-bars",
+    bsname: bsname,
+    url: Routes.ts_admin_match_path(@conn, :index)
+  ) %>
 
-<%= central_component("section_menu_button",
-  name: "advanced_search",
-  label: "Advanced search",
-  active: @active,
-  icon: Central.Helpers.StylingHelper.icon(:search),
-  bsname: bsname,
-  url: Routes.ts_admin_match_path(@conn, :index) <> "?search=true"
-) %>
+  <%= central_component("section_menu_button",
+    name: "advanced_search",
+    label: "Advanced search",
+    active: @active,
+    icon: Teiserver.Helper.StylingHelper.icon(:search),
+    bsname: bsname,
+    url: Routes.ts_admin_match_path(@conn, :index) <> "?search=true"
+  ) %>
+<% end %>
 
 <%= if @active == "user" do %>
   <%= central_component("section_menu_button",
@@ -35,12 +37,12 @@
       name: "user_view",
       label: "Standard view",
       active: @active,
-      icon: Central.Account.UserLib.icon(),
+      icon: Teiserver.Account.UserLib.icon(),
       bsname: bsname,
-      url: Routes.ts_battle_match_path(@conn, :show, @match.id)
+      url: ~p"/battle/#{@match.id}"
     ) %>
 
-    <%= if allow?(@conn, "Reviewer") do %>
+    <%= if allow?(@conn, "Overwatch") do %>
       <%= central_component("section_menu_button",
         name: "chat",
         label: "Chat",

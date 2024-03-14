@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.Clans do
+defmodule Teiserver.Repo.Migrations.Clans do
   use Ecto.Migration
 
   def change do
@@ -6,9 +6,7 @@ defmodule Central.Repo.Migrations.Clans do
       add :name, :string
       add :tag, :string
       add :icon, :string
-      add :colour1, :string
-      add :colour2, :string
-      add :text_colour, :string
+      add :colour, :string
 
       add :description, :text
       add :rating, :jsonb

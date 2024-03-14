@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.ReportResponses do
+defmodule Teiserver.Repo.Migrations.ReportResponses do
   use Ecto.Migration
 
   def change do
@@ -10,10 +10,6 @@ defmodule Central.Repo.Migrations.ReportResponses do
       add :accurate, :boolean, default: false
 
       timestamps()
-    end
-
-    alter table(:moderation_reports) do
-      add :closed, :boolean, default: false
     end
   end
 end

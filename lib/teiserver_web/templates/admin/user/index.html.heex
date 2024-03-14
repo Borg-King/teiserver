@@ -1,5 +1,6 @@
 <% bsname = view_colour()
-is_admin = allow?(@conn, "Admin") %>
+is_admin = allow?(@conn, "Admin")
+is_moderator = allow?(@conn, "Moderator") %>
 
 <script type="text/javascript" charset="utf-8">
   $(function() {
@@ -49,7 +50,7 @@ is_admin = allow?(@conn, "Admin") %>
           <% end %>
         <% end %>
 
-        <h4>Listing Users</h4>
+        <h4>Listing Users (<%= Enum.count(@users) %>)</h4>
 
         <table class="table table-sm">
           <thead>
@@ -69,7 +70,7 @@ is_admin = allow?(@conn, "Admin") %>
               <th>Moderator</th>
               <th>Registered</th>
 
-              <%= if is_admin do %>
+              <%= if is_moderator do %>
                 <th colspan="2">&nbsp;</th>
               <% else %>
                 <th>&nbsp;</th>
@@ -111,13 +112,13 @@ is_admin = allow?(@conn, "Admin") %>
                 <% end %>
 
                 <td>
-                  <%= if Enum.member?(user.data["roles"] || [], "Trusted"), do: "Trusted" %>
+                  <%= if Enum.member?(user.roles || [], "Trusted"), do: "Trusted" %>
                 </td>
                 <td>
-                  <%= if Enum.member?(user.data["roles"] || [], "Contributor"), do: "Contributor" %>
+                  <%= if Enum.member?(user.roles || [], "Contributor"), do: "Contributor" %>
                 </td>
                 <td>
-                  <%= if Enum.member?(user.data["roles"] || [], "Moderator"), do: "Moderator" %>
+                  <%= if Enum.member?(user.roles || [], "Moderator"), do: "Moderator" %>
                 </td>
 
                 <td>
@@ -130,7 +131,7 @@ is_admin = allow?(@conn, "Admin") %>
                   </a>
                 </td>
 
-                <%= if is_admin do %>
+                <%= if is_moderator do %>
                   <td>
                     <a
                       href={~p"/teiserver/admin/user/#{user.id}/edit"}

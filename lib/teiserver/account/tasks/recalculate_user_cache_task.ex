@@ -2,14 +2,14 @@ defmodule Teiserver.Account.RecacheUserStatsTask do
   @moduledoc """
   Used to recalculate certain user stats after various events
   """
-  # alias Central.Repo
+  # alias Teiserver.Repo
   # import Ecto.Query, warn: false
   alias Teiserver.{Account, Game}
   alias Teiserver.Game.MatchRatingLib
   alias Teiserver.Battle.MatchLib
   alias Teiserver.Data.Types, as: T
-  alias Central.Helpers.TimexHelper
-  import Central.Helpers.NumberHelper, only: [percent: 2]
+  alias Teiserver.Helper.TimexHelper
+  import Teiserver.Helper.NumberHelper, only: [percent: 2]
 
   @match_cache_recent_days 7
   @match_cache_max_days 31
@@ -22,6 +22,9 @@ defmodule Teiserver.Account.RecacheUserStatsTask do
       "Team" -> do_match_processed_team(userid)
       _ -> :ok
     end
+
+    # And now update the last_played timestamp
+    Account.update_cache_user(userid, %{last_played: match.started})
   end
 
   def do_match_processed_duel(userid) do
@@ -167,7 +170,8 @@ defmodule Teiserver.Account.RecacheUserStatsTask do
     # Filter down to just the recent ones rather than re-running the query
     timestamp_after = Timex.now() |> Timex.shift(days: -@match_cache_recent_days)
 
-    logs = logs
+    logs =
+      logs
       |> Enum.filter(fn log ->
         TimexHelper.greater_than(log.inserted_at, timestamp_after)
       end)

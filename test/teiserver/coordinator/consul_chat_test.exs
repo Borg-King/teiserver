@@ -1,8 +1,8 @@
 defmodule Teiserver.Coordinator.ConsulChatTest do
-  use Central.ServerCase, async: false
-  alias Teiserver.Battle.Lobby
+  @moduledoc false
+  use Teiserver.ServerCase, async: false
   alias Teiserver.Account.ClientLib
-  alias Teiserver.{User, Client, Coordinator}
+  alias Teiserver.{CacheUser, Client, Coordinator, Lobby}
 
   import Teiserver.TeiserverTestLib,
     only: [tachyon_auth_setup: 0, _tachyon_send: 2, _tachyon_recv: 1]
@@ -13,7 +13,7 @@ defmodule Teiserver.Coordinator.ConsulChatTest do
     %{socket: psocket, user: player} = tachyon_auth_setup()
 
     # User needs to be a moderator (at this time) to start/stop Coordinator mode
-    User.update_user(%{host | moderator: true})
+    CacheUser.update_user(%{host | roles: ["Moderator"]})
     ClientLib.refresh_client(host.id)
 
     lobby_data = %{
@@ -100,7 +100,7 @@ defmodule Teiserver.Coordinator.ConsulChatTest do
     player1_stamps = timestamps[player1.id]
     assert Enum.count(player1_stamps) == 4
 
-    flood_count = Central.cache_get(:teiserver_login_count, player1.id)
+    flood_count = Teiserver.cache_get(:teiserver_login_count, player1.id)
     assert flood_count == 1
 
     data = %{cmd: "c.lobby.message", message: "!ring other_player"}
@@ -110,7 +110,7 @@ defmodule Teiserver.Coordinator.ConsulChatTest do
     player1_stamps = timestamps[player1.id]
     assert Enum.count(player1_stamps) == 5
 
-    flood_count = Central.cache_get(:teiserver_login_count, player1.id)
+    flood_count = Teiserver.cache_get(:teiserver_login_count, player1.id)
     assert flood_count > 1
 
     message = Coordinator.call_consul(lobby_id, {:get, :welcome_message})

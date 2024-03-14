@@ -1,5 +1,5 @@
 defmodule TeiserverWeb.Battle.RatingsController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.{Account}
   alias Teiserver.Game.MatchRatingLib
@@ -7,7 +7,7 @@ defmodule TeiserverWeb.Battle.RatingsController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Battle.Match,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "leaderboard",
@@ -45,7 +45,7 @@ defmodule TeiserverWeb.Battle.RatingsController do
         ],
         order_by: "Leaderboard rating high to low",
         preload: [:user],
-        limit: 30
+        limit: 100
       )
 
     conn

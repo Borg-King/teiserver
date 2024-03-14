@@ -1,23 +1,23 @@
 defmodule TeiserverWeb.Logging.AggregateViewLogController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Logging
   alias Teiserver.Logging.AggregateViewLogLib
   alias Teiserver.Logging.AggregateViewLogsTask
-  alias Central.Helpers.TimexHelper
+  alias Teiserver.Helper.TimexHelper
 
-  alias Central.Helpers.TimexHelper
+  alias Teiserver.Helper.TimexHelper
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Logging.AggregateViewLog,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug :add_breadcrumb, name: 'Logging', url: '/logging'
   plug :add_breadcrumb, name: 'Aggregate', url: '/logging/aggregate_views'
 
   plug(AssignPlug,
-    site_menu_active: "central_logging",
+    site_menu_active: "logging",
     sub_menu_active: "aggregate"
   )
 

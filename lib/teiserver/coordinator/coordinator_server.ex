@@ -5,11 +5,11 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
   """
   use GenServer
   alias Teiserver.Config
-  alias Teiserver.{Account, User, Clans, Room, Coordinator, Client, Moderation}
-  alias Teiserver.Battle.Lobby
+  alias Teiserver.{Account, CacheUser, Clans, Room, Coordinator, Client, Moderation, Telemetry}
+  alias Teiserver.Lobby
   alias Teiserver.Coordinator.{CoordinatorCommands}
   alias Phoenix.PubSub
-  import Central.Helpers.TimexHelper, only: [date_to_str: 2]
+  import Teiserver.Helper.TimexHelper, only: [date_to_str: 2]
   require Logger
 
   @dispute_string [
@@ -40,10 +40,10 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
   def handle_info(:begin, _state) do
     Logger.debug("Starting up Coordinator main server")
     account = get_coordinator_account()
-    Central.cache_put(:application_metadata_cache, "teiserver_coordinator_userid", account.id)
+    Teiserver.cache_put(:application_metadata_cache, "teiserver_coordinator_userid", account.id)
 
     {user, client} =
-      case User.internal_client_login(account.id) do
+      case CacheUser.internal_client_login(account.id) do
         {:ok, user, client} -> {user, client}
         :error -> raise "No coordinator user found"
       end
@@ -64,7 +64,7 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
     |> Enum.each(fn room_name ->
       Room.get_or_make_room(room_name, user.id)
       Room.add_user_to_room(user.id, room_name)
-      :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
     end)
 
     # Now join the clan channels
@@ -73,12 +73,12 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
       room_name = Room.clan_room_name(clan.tag)
       Room.get_or_make_room(room_name, user.id, clan.id)
       Room.add_user_to_room(user.id, room_name)
-      :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
     end)
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
-    :ok = PubSub.subscribe(Central.PubSub, "client_inout")
-    :ok = PubSub.subscribe(Central.PubSub, "legacy_user_updates:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_server")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "client_inout")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "legacy_user_updates:#{user.id}")
 
     {:noreply, state}
   end
@@ -90,7 +90,7 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
   # def handle_info({:new_message, userid, "coordinator", _message}, state) do
   #   # If it's us sending it, don't reply
   #   if userid != state.userid do
-  #     username = User.get_username(userid)
+  #     username = CacheUser.get_username(userid)
   #     Room.send_message(state.userid, "coordinator", "I don't currently handle messages, sorry #{username}")
   #   end
   #   {:noreply, state}
@@ -154,24 +154,15 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
 
     case converted_message do
       ^warning_response ->
-        client = Client.get_client_by_id(userid)
-
-        last_login =
-          Account.get_user_stat_data(userid)
-          |> Map.get("last_login")
-
-        time_diff = System.system_time(:second) - last_login
-        Logger.info("Acknowledge time of #{time_diff} seconds for #{userid}:#{client.name}")
-
         Client.clear_awaiting_warn_ack(userid)
-        User.send_direct_message(state.userid, userid, "Thank you")
+        CacheUser.send_direct_message(state.userid, userid, "Thank you")
 
       _ ->
-        user = User.get_user_by_id(userid)
+        user = CacheUser.get_user_by_id(userid)
         Logger.info("CoordinatorServer unhandled DM from #{user.name} of: #{message}")
 
-        if not User.is_bot?(user) do
-          User.send_direct_message(
+        if not CacheUser.is_bot?(user) do
+          CacheUser.send_direct_message(
             state.userid,
             userid,
             "I don't currently handle messages, sorry #{user.name}"
@@ -214,7 +205,7 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
   def handle_info(%{channel: "client_inout"}, state), do: {:noreply, state}
 
   def handle_info({:do_client_inout, :login, userid}, state) do
-    user = User.get_user_by_id(userid)
+    user = CacheUser.get_user_by_id(userid)
 
     if user do
       # Do we have a system welcome message?
@@ -222,6 +213,13 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
 
       if welcome_message != "" do
         Coordinator.send_to_user(userid, welcome_message)
+      end
+
+      if Map.get(user, :lobby_client, nil) == "skylobby" do
+        Coordinator.send_to_user(
+          userid,
+          "skylobby is not supported so is not benefiting from new features. Future server improvements are likely to break it; please instead use the official Chobby client available from our website - https://www.beyondallreason.info/download"
+        )
       end
 
       relevant_restrictions =
@@ -243,6 +241,7 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
           |> Enum.filter(fn action ->
             cond do
               Enum.member?(action.restrictions, "Bridging") -> false
+              Enum.member?(action.restrictions, "Note") -> false
               true -> true
             end
           end)
@@ -257,37 +256,44 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
             " - #{action.reason}#{expires}"
           end)
 
-        msg =
-          [
-            "This is a reminder that you received one or more formal moderation actions as listed below:"
-          ] ++ reasons
+        if not Enum.empty?(reasons) do
+          msg =
+            [
+              "This is a reminder that you received one or more formal moderation actions as listed below:"
+            ] ++ reasons
 
-        has_warning =
-          actions
-          |> Enum.map(fn a -> a.restrictions end)
-          |> List.flatten()
-          |> Enum.member?("Warning reminder")
+          has_warning =
+            actions
+            |> Enum.map(fn a -> a.restrictions end)
+            |> List.flatten()
+            |> Enum.member?("Warning reminder")
 
-        # Do we need an acknowledgement? If they are muted then no.
-        msg =
-          cond do
-            User.has_mute?(user) ->
-              msg ++ @dispute_string
+          # Do we need an acknowledgement? If they are muted then no.
+          msg =
+            cond do
+              CacheUser.has_mute?(user) ->
+                msg ++ @dispute_string
 
-            has_warning ->
-              Lobby.remove_user_from_any_lobby(user.id)
-              Client.set_awaiting_warn_ack(userid)
+              has_warning ->
+                Telemetry.log_simple_server_event(
+                  user.id,
+                  "has_warning.remove_user_from_any_lobby"
+                )
 
-              acknowledge_prompt =
-                Config.get_site_config_cache("teiserver.Warning acknowledge prompt")
+                Lobby.remove_user_from_any_lobby(user.id)
+                Client.set_awaiting_warn_ack(userid)
 
-              msg ++ [@dispute_string, acknowledge_prompt]
+                acknowledge_prompt =
+                  Config.get_site_config_cache("teiserver.Warning acknowledge prompt")
 
-            true ->
-              msg ++ @dispute_string
-          end
+                msg ++ [@dispute_string, acknowledge_prompt]
 
-        Coordinator.send_to_user(userid, msg)
+              true ->
+                msg ++ @dispute_string
+            end
+
+          Coordinator.send_to_user(userid, msg)
+        end
       end
     end
 
@@ -309,7 +315,7 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
     {:noreply, state}
   end
 
-  @spec get_coordinator_account() :: Central.Account.User.t()
+  @spec get_coordinator_account() :: Teiserver.Account.CacheUser.t()
   def get_coordinator_account() do
     user =
       Account.get_user(nil,
@@ -322,25 +328,25 @@ defmodule Teiserver.Coordinator.CoordinatorServer do
       nil ->
         # Make account
         {:ok, account} =
-          Account.create_user(%{
+          Account.script_create_user(%{
             name: "Coordinator",
             email: "coordinator@teiserver",
             icon: "fa-solid fa-sitemap",
             colour: "#AA00AA",
             password: Account.make_bot_password(),
+            roles: ["Bot", "Verified"],
             data: %{
               bot: true,
               moderator: true,
-              lobby_client: "Teiserver Internal Process",
-              roles: ["Bot", "Verified"]
+              lobby_client: "Teiserver Internal Process"
             }
           })
 
         Account.update_user_stat(account.id, %{
-          country_override: Application.get_env(:central, Teiserver)[:server_flag]
+          country_override: Application.get_env(:teiserver, Teiserver)[:server_flag]
         })
 
-        User.recache_user(account.id)
+        CacheUser.recache_user(account.id)
         account
 
       account ->

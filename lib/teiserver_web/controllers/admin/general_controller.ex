@@ -1,15 +1,15 @@
 defmodule TeiserverWeb.Admin.GeneralController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   plug(AssignPlug,
-    site_menu_active: "teiserver_admin",
+    site_menu_active: "admin",
     sub_menu_active: ""
   )
 
   plug(Bodyguard.Plug.Authorize,
     policy: Teiserver.Staff,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
   )
 
   plug(:add_breadcrumb, name: 'Admin', url: '/teiserver/admin')

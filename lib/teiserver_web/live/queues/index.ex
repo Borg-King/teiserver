@@ -8,18 +8,17 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
   alias Teiserver.{Game, Client}
   alias Teiserver.Game.{QueueLib}
 
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @impl true
   def mount(_params, session, socket) do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
     client = Client.get_client_by_id(socket.assigns[:current_user].id)
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_all_queues")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_all_queues")
 
     db_queues =
       Game.list_queues()
@@ -66,11 +65,10 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
       |> assign(:site_menu_active, "matchmaking")
       |> assign(:db_queues, db_queues)
       |> assign(:queue_info, queue_info)
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
       |> assign(:match_id, nil)
       |> assign(:is_admin, is_admin)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -271,7 +269,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Index do
   defp apply_action(socket, :index, _params) do
     :ok =
       PubSub.subscribe(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_messages:#{socket.assigns[:current_user].id}"
       )
 

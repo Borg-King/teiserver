@@ -3,12 +3,12 @@ defmodule TeiserverWeb.ClientLive.Index do
   alias Phoenix.PubSub
 
   alias Teiserver
-  alias Teiserver.{Client, User}
+  alias Teiserver.{Client, CacheUser}
   alias Teiserver.Account.UserLib
 
   @extra_menu_content """
   &nbsp;&nbsp;&nbsp;
-    <a href='/teiserver/battle/lobbies' class="btn btn-outline-primary">
+    <a href='/battle/lobbies' class="btn btn-outline-primary">
       <i class="fa-solid fa-fw fa-swords"></i>
       Battles
     </a>
@@ -25,14 +25,13 @@ defmodule TeiserverWeb.ClientLive.Index do
       |> Map.new(fn {userid, _} ->
         {
           userid,
-          User.get_user_by_id(userid) |> limited_user
+          CacheUser.get_user_by_id(userid) |> limited_user
         }
       end)
 
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
       |> add_breadcrumb(name: "Teiserver", url: "/teiserver")
       |> add_breadcrumb(name: "Admin", url: "/teiserver/admin")
       |> add_breadcrumb(name: "Clients", url: "/teiserver/admin/client")
@@ -41,12 +40,11 @@ defmodule TeiserverWeb.ClientLive.Index do
       |> assign(:clients, clients)
       |> assign(:client_ids, Map.keys(clients))
       |> assign(:users, users)
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
       |> assign(:extra_menu_content, @extra_menu_content)
       |> assign(:filters, ["people", "normal"])
       |> apply_filters
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -58,7 +56,7 @@ defmodule TeiserverWeb.ClientLive.Index do
       false ->
         {:noreply,
          socket
-         |> redirect(to: Routes.general_page_path(socket, :index))}
+         |> redirect(to: ~p"/")}
     end
   end
 
@@ -83,7 +81,7 @@ defmodule TeiserverWeb.ClientLive.Index do
         if Map.has_key?(assigns.users, userid) do
           assigns.users[userid]
         else
-          User.get_user_by_id(userid)
+          CacheUser.get_user_by_id(userid)
           |> limited_user
         end
       end)
@@ -116,7 +114,7 @@ defmodule TeiserverWeb.ClientLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_liveview_client_index_updates")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_liveview_client_index_updates")
 
     socket
     |> assign(:page_title, "Listing Clients")

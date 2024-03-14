@@ -1,19 +1,18 @@
 defmodule TeiserverWeb.Admin.BadgeTypeController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Account
   alias Teiserver.Account.BadgeType
   alias Teiserver.Account.BadgeTypeLib
-  alias Central.Helpers.StylingHelper
+  alias Teiserver.Helper.StylingHelper
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Account.BadgeType,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
-    site_menu_active: "teiserver_admin",
-    sub_menu_active: "tool"
+    site_menu_active: "admin"
   )
 
   plug :add_breadcrumb, name: 'Account', url: '/teiserver'

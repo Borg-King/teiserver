@@ -1,16 +1,16 @@
 defmodule TeiserverWeb.Admin.UserControllerTest do
-  use CentralWeb.ConnCase
+  use TeiserverWeb.ConnCase
 
   alias Central.Helpers.GeneralTestLib
   # alias Teiserver.TeiserverTestLib
 
   setup do
-    GeneralTestLib.conn_setup(Teiserver.TeiserverTestLib.root_permissions())
+    GeneralTestLib.conn_setup(Teiserver.TeiserverTestLib.server_permissions())
     |> Teiserver.TeiserverTestLib.conn_setup()
   end
 
   # @create_attrs %{
-  #   colour: "some colour",
+  #   colour: "#AA0000",
   #   email: "some email",
   #   icon: "fa-regular fa-home",
   #   name: "some name",
@@ -20,7 +20,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #   data: "{}"
   # }
   @update_attrs %{
-    colour: "some updated colour",
+    colour: "#0000AA",
     icon: "fa-solid fa-wrench",
     name: "some updated name",
     username: "some updated username"
@@ -34,7 +34,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
     end
 
     test "lists all users - redirect", %{conn: conn} do
-      main_user = Central.Account.get_user_by_name("dud user")
+      main_user = Teiserver.Account.get_user_by_name("dud user")
       conn = get(conn, ~p"/teiserver/admin/user" <> "?s=dud user")
       assert redirected_to(conn) == ~p"/teiserver/admin/user/#{main_user.id}"
     end
@@ -58,30 +58,6 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
       assert html_response(conn, 200) =~ "Save changes"
     end
   end
-
-  # describe "create user" do
-  #   test "redirects to show when data is valid", %{conn: conn, child_group: child_group} do
-  #     conn =
-  #       post(conn, ~p"/teiserver/admin/user",
-  #         user: Map.put(@create_attrs, :admin_group_id, child_group.id)
-  #       )
-
-  #     # assert %{id: id} = redirected_params(conn)
-  #     # assert redirected_to(conn) == ~p"/teiserver/admin/user/#{id}"
-  #     assert redirected_to(conn) == ~p"/teiserver/admin/user"
-
-  #     new_user = Account.list_users(search: [name: @create_attrs.name])
-  #     assert Enum.count(new_user) == 1
-
-  #     # conn = get(conn, ~p"/teiserver/admin/user/#{id}")
-  #     # assert html_response(conn, 200) =~ "Show User"
-  #   end
-
-  #   test "renders errors when data is invalid", %{conn: conn} do
-  #     conn = post(conn, ~p"/teiserver/admin/user", user: @invalid_attrs)
-  #     assert html_response(conn, 200) =~ "Oops, something went wrong!"
-  #   end
-  # end
 
   describe "edit user" do
     test "renders form for editing nil", %{conn: conn} do
@@ -110,7 +86,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
       # assert redirected_to(conn) == ~p"/teiserver/admin/user"
 
       conn = get(conn, ~p"/teiserver/admin/user/#{user}")
-      assert html_response(conn, 200) =~ "some updated colour"
+      assert html_response(conn, 200) =~ "#0000AA"
     end
 
     test "renders errors when data is invalid", %{conn: conn, user: user} do
@@ -127,7 +103,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
           "data" => %{}
         })
 
-      Teiserver.User.recache_user(user.id)
+      Teiserver.CacheUser.recache_user(user.id)
 
       conn =
         put(conn, Routes.ts_admin_user_path(conn, :rename_post, user), new_name: "new_test_name")
@@ -145,7 +121,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
           "data" => %{}
         })
 
-      Teiserver.User.recache_user(user.id)
+      Teiserver.CacheUser.recache_user(user.id)
 
       conn =
         put(conn, Routes.ts_admin_user_path(conn, :rename_post, user),
@@ -163,7 +139,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #   test "apply temporary mute", %{conn: conn} do
   #     %{user: user} = TeiserverTestLib.tachyon_auth_setup()
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     assert cached_user.muted == [false, nil]
 
   #     conn = put(conn, Routes.ts_admin_user_path(conn, :perform_action, user.id, "report_action"), %{
@@ -173,7 +149,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #     })
   #     assert redirected_to(conn) == ~p"/teiserver/admin/user/#{user.id}" <> "#reports_tab"
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     [muted, until] = cached_user.muted
   #     assert muted == true
   #     assert until != nil
@@ -182,7 +158,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #   test "apply permanent mute", %{conn: conn} do
   #     %{user: user} = TeiserverTestLib.tachyon_auth_setup()
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     assert cached_user.muted == [false, nil]
 
   #     conn = put(conn, Routes.ts_admin_user_path(conn, :perform_action, user.id, "report_action"), %{
@@ -192,7 +168,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #     })
   #     assert redirected_to(conn) == ~p"/teiserver/admin/user/#{user.id}" <> "#reports_tab"
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     [muted, until] = cached_user.muted
   #     assert muted == true
   #     assert until == nil
@@ -201,7 +177,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #   test "apply temporary ban", %{conn: conn} do
   #     %{user: user} = TeiserverTestLib.tachyon_auth_setup()
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     assert cached_user.banned == [false, nil]
   #     assert Client.get_client_by_id(user.id)
 
@@ -212,7 +188,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #     })
   #     assert redirected_to(conn) == ~p"/teiserver/admin/user/#{user.id}" <> "#reports_tab"
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     [banned, until] = cached_user.banned
   #     assert banned == true
   #     assert until != nil
@@ -222,7 +198,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #   test "apply permanent ban", %{conn: conn} do
   #     %{user: user} = TeiserverTestLib.tachyon_auth_setup()
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     assert cached_user.banned == [false, nil]
   #     assert Client.get_client_by_id(user.id)
 
@@ -233,7 +209,7 @@ defmodule TeiserverWeb.Admin.UserControllerTest do
   #     })
   #     assert redirected_to(conn) == ~p"/teiserver/admin/user/#{user.id}" <> "#reports_tab"
 
-  #     cached_user = UserCache.get_user_by_id(user.id)
+  #     cached_user = UserCacheLib.get_user_by_id(user.id)
   #     [banned, until] = cached_user.banned
   #     assert banned == true
   #     assert until == nil

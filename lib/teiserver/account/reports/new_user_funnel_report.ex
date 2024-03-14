@@ -1,4 +1,5 @@
 defmodule Teiserver.Account.NewUserFunnelReport do
+  @moduledoc false
   alias Teiserver.{Account, Telemetry, Battle}
 
   @spec icon() :: String.t()
@@ -20,6 +21,7 @@ defmodule Teiserver.Account.NewUserFunnelReport do
         search: [
           inserted_after: start_date
         ],
+        select: [:roles, :id],
         limit: :infinity
       )
 
@@ -28,19 +30,23 @@ defmodule Teiserver.Account.NewUserFunnelReport do
     # Verified
     verified_userids =
       accounts
-      |> Enum.filter(fn %{data: data} -> Enum.member?(data["roles"], "Verified") end)
+      |> Enum.filter(fn user -> Enum.member?(user.roles, "Verified") end)
       |> Enum.map(fn %{id: id} -> id end)
 
     verified = Enum.count(verified_userids)
 
     # Singleplayer
     event_type_ids = [
-      Telemetry.get_or_add_event_type("game_start:singleplayer:lone_other_skirmish"),
-      Telemetry.get_or_add_event_type("game_start:singleplayer:scenario_start")
+      Telemetry.ComplexClientEventTypeLib.get_or_add_complex_client_event_type(
+        "game_start:singleplayer:lone_other_skirmish"
+      ),
+      Telemetry.ComplexClientEventTypeLib.get_or_add_complex_client_event_type(
+        "game_start:singleplayer:scenario_start"
+      )
     ]
 
     events =
-      Telemetry.list_client_events(
+      Telemetry.list_complex_client_events(
         search: [
           event_type_id_in: event_type_ids,
           user_id_in: verified_userids
@@ -55,12 +61,16 @@ defmodule Teiserver.Account.NewUserFunnelReport do
 
     # Online
     event_type_ids = [
-      Telemetry.get_or_add_event_type("game_start:multiplayer:connecting"),
-      Telemetry.get_or_add_event_type("lobby:multiplayer:hostgame")
+      Telemetry.ComplexClientEventTypeLib.get_or_add_complex_client_event_type(
+        "game_start:multiplayer:connecting"
+      ),
+      Telemetry.ComplexClientEventTypeLib.get_or_add_complex_client_event_type(
+        "lobby:multiplayer:hostgame"
+      )
     ]
 
     events =
-      Telemetry.list_client_events(
+      Telemetry.list_complex_client_events(
         search: [
           event_type_id_in: event_type_ids,
           user_id_in: verified_userids

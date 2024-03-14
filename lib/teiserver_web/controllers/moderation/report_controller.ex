@@ -1,6 +1,6 @@
 defmodule TeiserverWeb.Moderation.ReportController do
   @moduledoc false
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.{Moderation, Account}
   alias Teiserver.Account.UserLib
@@ -9,7 +9,7 @@ defmodule TeiserverWeb.Moderation.ReportController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Moderation.Report,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "moderation",
@@ -31,7 +31,13 @@ defmodule TeiserverWeb.Moderation.ReportController do
         order_by: "Newest first"
       )
 
+    target =
+      if params["target_id"] do
+        Account.get_user(params["target_id"])
+      end
+
     conn
+    |> assign(:target, target)
     |> assign(:target_id, params["target_id"])
     |> assign(:reports, reports)
     |> assign(:params, params)
@@ -49,7 +55,13 @@ defmodule TeiserverWeb.Moderation.ReportController do
         order_by: params["order"]
       )
 
+    target =
+      if params["target_id"] do
+        Account.get_user(params["target_id"])
+      end
+
     conn
+    |> assign(:target, target)
     |> assign(:target_id, params["target_id"])
     |> assign(:params, params)
     |> assign(:reports, reports)
@@ -134,8 +146,7 @@ defmodule TeiserverWeb.Moderation.ReportController do
         ],
         preload: [
           :reporter,
-          :target,
-          :responder
+          :target
         ],
         order_by: "Newest first",
         limit: :infinity
@@ -148,8 +159,7 @@ defmodule TeiserverWeb.Moderation.ReportController do
         ],
         preload: [
           :reporter,
-          :target,
-          :responder
+          :target
         ],
         order_by: "Newest first",
         limit: :infinity
@@ -171,7 +181,7 @@ defmodule TeiserverWeb.Moderation.ReportController do
     stats = Account.get_user_stat_data(user.id)
 
     conn
-    |> assign(:restrictions_lists, Central.Account.UserLib.list_restrictions())
+    |> assign(:restrictions_lists, Teiserver.Account.UserLib.list_restrictions())
     |> assign(:coc_lookup, Teiserver.Account.CodeOfConductData.flat_data())
     |> assign(:user, user)
     |> assign(:reports_made, reports_made)

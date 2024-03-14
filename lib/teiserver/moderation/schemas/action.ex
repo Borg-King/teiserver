@@ -1,11 +1,12 @@
 defmodule Teiserver.Moderation.Action do
   @moduledoc false
-  use CentralWeb, :schema
-  alias Central.Helpers.TimexHelper
+  use TeiserverWeb, :schema
+  alias Teiserver.Helper.TimexHelper
 
   schema "moderation_actions" do
-    belongs_to :target, Central.Account.User
+    belongs_to :target, Teiserver.Account.User
     field :reason, :string
+    field :appeal_status, :string
     field :notes, :string
     field :restrictions, {:array, :string}
     field :score_modifier, :integer
@@ -13,7 +14,9 @@ defmodule Teiserver.Moderation.Action do
 
     field :hidden, :boolean, default: false
 
-    has_many :reports, Teiserver.Moderation.Report, foreign_key: :result_id
+    field :discord_message_id, :integer
+
+    belongs_to :report_group, Teiserver.Moderation.ReportGroup
 
     timestamps()
   end
@@ -26,7 +29,10 @@ defmodule Teiserver.Moderation.Action do
       |> parse_humantimes(~w(expires)a)
 
     struct
-    |> cast(params, ~w(target_id reason restrictions score_modifier expires notes hidden)a)
+    |> cast(
+      params,
+      ~w(target_id report_group_id reason restrictions score_modifier expires notes hidden discord_message_id appeal_status)a
+    )
     |> validate_required(~w(target_id reason restrictions expires score_modifier)a)
     |> adjust_restrictions
     |> validate_length(:restrictions, min: 1)

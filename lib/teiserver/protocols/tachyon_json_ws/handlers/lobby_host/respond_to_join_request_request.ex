@@ -1,9 +1,7 @@
 defmodule Teiserver.Tachyon.Handlers.LobbyHost.RespondToJoinRequestRequest do
-  @moduledoc """
-
-  """
+  @moduledoc false
   alias Teiserver.Data.Types, as: T
-  alias Teiserver.Battle.Lobby
+  alias Teiserver.Lobby
   alias Teiserver.Tachyon.Responses.LobbyHost.RespondToJoinRequestResponse
 
   @spec dispatch_handlers :: map()
@@ -13,8 +11,8 @@ defmodule Teiserver.Tachyon.Handlers.LobbyHost.RespondToJoinRequestRequest do
     }
   end
 
-  @spec execute(T.tachyon_conn(), map, map) ::
-          {{T.tachyon_command(), T.tachyon_object()}, T.tachyon_conn()}
+  @spec execute(T.tachyon_conn(), T.tachyon_object(), map) ::
+          {T.tachyon_response(), T.tachyon_conn()}
   def execute(conn, %{"response" => "accept"} = object, _meta) do
     Lobby.accept_join_request(object["userid"], conn.lobby_id)
 

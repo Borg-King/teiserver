@@ -5,18 +5,13 @@
     var selected_tab = window.location.hash.substr(1).replace("_tab", "");
     $('#the_tabs a:first').tab('show');
     $('#the_tabs [href="#' + selected_tab + '_tab"]').tab('show');
-
-    page_quick_actions = [
-      {label: "Edit action", icon: "<%= icon() %>", url: "<%= Routes.moderation_action_path(@conn, :edit, @action) %>", keywords: ["edit", "action", "edit action"]},
-    ];
   });
 </script>
 
-<%= render(
-  TeiserverWeb.Moderation.GeneralView,
-  "sub_menu.html",
-  Map.merge(assigns, %{active: "actions"})
-) %>
+<TeiserverWeb.Moderation.ModerationComponents.sub_menu
+  active="actions"
+  view_colour={view_colour()}
+/>
 
 <div class="row section-menu">
   <div class="col-md-12">
@@ -33,6 +28,14 @@
         <hr />
 
         <div class="float-end">
+          <a
+            :if={@use_discord && @channel && @action.discord_message_id}
+            href={"https://discord.com/channels/#{@guild_id}/#{@channel.channel_id}/#{@action.discord_message_id}"}
+            class={"btn btn-outline-#{bsname}"}
+          >
+            <Fontawesome.icon icon="discord" style="brands" /> Discord link
+          </a>
+
           <a
             href={"#{Routes.moderation_action_path(@conn, :index)}?target_id=#{@action.target_id}"}
             class={"btn btn-outline-#{bsname}"}
@@ -68,17 +71,9 @@
             </a>
           </li>
 
-          <li>
-            <a href="#reports_tab" role="tab" class="nav-link" data-bs-toggle="tab">
-              <%= central_component("icon", icon: Teiserver.Moderation.ReportLib.icon()) %> Reports (<%= Enum.count(
-                @action.reports
-              ) %>)
-            </a>
-          </li>
-
           <li class="nav-item">
             <a href="#logs_tab" role="tab" class="nav-link" data-bs-toggle="tab">
-              <%= central_component("icon", icon: Central.Helpers.StylingHelper.icon(:list)) %> Logs (<%= Enum.count(
+              <%= central_component("icon", icon: Teiserver.Helper.StylingHelper.icon(:list)) %> Logs (<%= Enum.count(
                 @logs
               ) %>)
             </a>
@@ -88,10 +83,6 @@
         <div class="tab-content">
           <div class="tab-pane" id="details_tab" style="padding:5px;">
             <%= render("tab_details.html", assigns) %>
-          </div>
-
-          <div class="tab-pane" id="reports_tab" style="padding:5px;">
-            <%= render("tab_reports.html", assigns) %>
           </div>
 
           <div class="tab-pane" id="logs_tab" style="padding:5px;">

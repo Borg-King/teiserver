@@ -5,9 +5,8 @@ defmodule TeiserverWeb.TournamentLive.Show do
   require Logger
 
   alias Teiserver.Battle.BalanceLib
-  alias Teiserver.{Account, Battle, Coordinator, User}
-  alias Teiserver.Battle.{Lobby, LobbyLib}
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  alias Teiserver.{Account, Battle, Coordinator, Lobby, CacheUser, Telemetry}
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @extra_menu_content """
     &nbsp;&nbsp;&nbsp;
@@ -22,8 +21,6 @@ defmodule TeiserverWeb.TournamentLive.Show do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> TSAuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
     moderator = allow?(socket, "Moderator")
     admin_dev = allow?(socket, "admin.dev.developer")
@@ -34,6 +31,8 @@ defmodule TeiserverWeb.TournamentLive.Show do
       end
 
     client = Account.get_client_by_id(socket.assigns[:current_user].id)
+    friends = Account.list_friend_ids_of_user(socket.assigns[:current_user].id)
+    ignored = Account.list_userids_ignored_by_userid(socket.assigns[:current_user].id)
 
     :timer.send_interval(10_000, :tick)
 
@@ -41,11 +40,13 @@ defmodule TeiserverWeb.TournamentLive.Show do
       socket
       |> Teiserver.ServerUserPlug.live_call()
       |> add_breadcrumb(name: "Teiserver", url: "/teiserver")
-      |> add_breadcrumb(name: "Battles", url: "/teiserver/battle/lobbies")
+      |> add_breadcrumb(name: "Battles", url: "/battle/lobbies")
+      |> assign(:friends, friends)
+      |> assign(:ignored, ignored)
       |> assign(:ratings, %{})
       |> assign(:client, client)
       |> assign(:site_menu_active, "teiserver_lobbies")
-      |> assign(:view_colour, LobbyLib.colours())
+      |> assign(:view_colour, Lobby.colours())
       |> assign(:messages, [])
       |> assign(:extra_menu_content, extra_content)
       |> assign(:consul_command, "")
@@ -53,25 +54,25 @@ defmodule TeiserverWeb.TournamentLive.Show do
       |> assign(:moderator, moderator)
       |> assign(:admin_dev, admin_dev)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
   def handle_params(_, _, %{assigns: %{current_user: nil}} = socket) do
-    {:noreply, socket |> redirect(to: Routes.general_page_path(socket, :index))}
+    {:noreply, socket |> redirect(to: ~p"/")}
   end
 
   def handle_params(%{"id" => id}, _, %{} = socket) do
     id = int_parse(id)
     current_user = socket.assigns[:current_user]
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_liveview_lobby_updates:#{id}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_user_updates:#{current_user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_liveview_lobby_updates:#{id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_user_updates:#{current_user.id}")
     lobby = Battle.get_lobby(id)
 
     :ok =
       PubSub.subscribe(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_messages:#{socket.assigns[:current_user].id}"
       )
 
@@ -85,7 +86,7 @@ defmodule TeiserverWeb.TournamentLive.Show do
       true ->
         {users, clients, ratings, parties, stats} = get_user_and_clients(lobby.players)
 
-        bar_user = User.get_user_by_id(socket.assigns.current_user.id)
+        bar_user = CacheUser.get_user_by_id(socket.assigns.current_user.id)
         lobby = Map.put(lobby, :uuid, Battle.get_lobby_match_uuid(id))
         modoptions = Battle.get_modoptions(id)
 
@@ -94,7 +95,7 @@ defmodule TeiserverWeb.TournamentLive.Show do
          |> assign(:ratings, ratings)
          |> assign(:bar_user, bar_user)
          |> assign(:page_title, page_title(socket.assigns.live_action))
-         |> add_breadcrumb(name: lobby.name, url: "/teiserver/battles/lobbies/#{lobby.id}")
+         |> add_breadcrumb(name: lobby.name, url: "/battles/lobbies/#{lobby.id}")
          |> assign(:id, id)
          |> assign(:lobby, lobby)
          |> assign(:modoptions, modoptions)
@@ -108,7 +109,7 @@ defmodule TeiserverWeb.TournamentLive.Show do
 
   defp get_user_and_clients(id_list) do
     users =
-      User.list_users(id_list)
+      CacheUser.list_users(id_list)
       |> Map.new(fn u -> {u.id, u} end)
 
     clients =
@@ -125,7 +126,7 @@ defmodule TeiserverWeb.TournamentLive.Show do
       |> Map.drop([nil])
       |> Map.filter(fn {_id, members} -> Enum.count(members) > 1 end)
       |> Map.keys()
-      |> Enum.zip(Central.Helpers.StylingHelper.bright_hex_colour_list())
+      |> Enum.zip(Teiserver.Helper.StylingHelper.bright_hex_colour_list())
       |> Map.new()
 
     stats =
@@ -303,6 +304,7 @@ defmodule TeiserverWeb.TournamentLive.Show do
         %{assigns: %{id: id, bar_user: _bar_user}} = socket
       ) do
     Lobby.kick_user_from_battle(int_parse(target_id), id)
+    Telemetry.log_simple_server_event(int_parse(target_id), "lobby.kicked_from_web_interface")
     {:noreply, socket}
   end
 

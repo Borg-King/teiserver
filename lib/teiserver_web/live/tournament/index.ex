@@ -4,23 +4,20 @@ defmodule TeiserverWeb.TournamentLive.Index do
   alias Phoenix.PubSub
 
   alias Teiserver
-  alias Teiserver.{Battle, Account}
-  alias Teiserver.Battle.{LobbyLib}
+  alias Teiserver.{Battle, Account, Lobby}
 
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @impl true
   def mount(_params, session, socket) do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> TSAuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
     client = Account.get_client_by_id(socket.assigns[:current_user].id)
 
     can_join =
-      Teiserver.User.has_any_role?(socket.assigns[:current_user].id, [
+      Teiserver.CacheUser.has_any_role?(socket.assigns[:current_user].id, [
         "Moderator",
         "Caster",
         "TourneyPlayer",
@@ -33,15 +30,15 @@ defmodule TeiserverWeb.TournamentLive.Index do
       |> assign(:client, client)
       |> assign(:can_join, can_join)
       |> assign(:site_menu_active, "tournaments")
-      |> assign(:view_colour, LobbyLib.colours())
+      |> assign(:view_colour, Lobby.colours())
       |> get_lobbies()
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
   def handle_params(_, _, %{assigns: %{current_user: nil}} = socket) do
-    {:noreply, socket |> redirect(to: Routes.general_page_path(socket, :index))}
+    {:noreply, socket |> redirect(to: ~p"/")}
   end
 
   def handle_params(params, _url, socket) do
@@ -115,11 +112,11 @@ defmodule TeiserverWeb.TournamentLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_liveview_lobby_index_updates")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_liveview_lobby_index_updates")
 
     :ok =
       PubSub.subscribe(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_messages:#{socket.assigns[:current_user].id}"
       )
 

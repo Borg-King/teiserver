@@ -9,10 +9,10 @@
 defmodule Teiserver.Client do
   @moduledoc false
   alias Phoenix.PubSub
-  alias Teiserver.{Room, User, Account, Telemetry, Clans}
-  alias Teiserver.Battle.Lobby
+  alias Teiserver.{Room, CacheUser, Account, Telemetry, Clans, Coordinator}
+  alias Teiserver.Lobby
   alias Teiserver.Account.ClientLib
-  # alias Central.Helpers.TimexHelper
+  # alias Teiserver.Helper.TimexHelper
   require Logger
 
   alias Teiserver.Data.Types, as: T
@@ -21,6 +21,7 @@ defmodule Teiserver.Client do
   def create(client) do
     Map.merge(
       %{
+        connected: false,
         in_game: false,
         away: false,
         rank: 1,
@@ -44,8 +45,6 @@ defmodule Teiserver.Client do
         },
         side: 0,
         role: "spectator",
-
-        # TODO: Change client:lobby_id to be client:battle_lobby_id
         lobby_id: nil,
         print_client_messages: false,
         print_server_messages: false,
@@ -101,19 +100,20 @@ defmodule Teiserver.Client do
 
     client =
       create(%{
+        connected: true,
         userid: user.id,
         name: user.name,
         tcp_pid: self(),
         rank: user.rank,
-        moderator: User.is_moderator?(user),
-        bot: User.is_bot?(user),
+        moderator: CacheUser.is_moderator?(user),
+        bot: CacheUser.is_bot?(user),
         away: false,
         in_game: false,
         ip: ip || stats["last_ip"],
         country: stats["country"] || "??",
         lobby_client: stats["lobby_client"],
-        shadowbanned: User.is_shadowbanned?(user),
-        muted: User.has_mute?(user),
+        shadowbanned: CacheUser.is_shadowbanned?(user),
+        muted: CacheUser.has_mute?(user),
         awaiting_warn_ack: false,
         warned: false,
         token_id: token_id,
@@ -124,7 +124,7 @@ defmodule Teiserver.Client do
     ClientLib.start_client_server(client)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "client_inout",
       %{
         channel: "client_inout",
@@ -135,7 +135,7 @@ defmodule Teiserver.Client do
     )
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{user.id}",
       %{
         channel: "teiserver_client_messages:#{user.id}",
@@ -144,7 +144,7 @@ defmodule Teiserver.Client do
     )
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_watch:#{user.id}",
       %{
         channel: "teiserver_client_watch:#{user.id}",
@@ -254,19 +254,37 @@ defmodule Teiserver.Client do
   def disconnect(userid, reason \\ nil) do
     case get_client_by_id(userid) do
       nil -> nil
-      client -> do_disconnect(client, reason)
+      client -> do_disconnect(client, reason, false)
+    end
+  end
+
+  @spec kick_disconnect(T.userid(), nil | String.t()) :: nil | :ok | {:error, any}
+  def kick_disconnect(userid, reason \\ nil) do
+    case get_client_by_id(userid) do
+      nil -> nil
+      client -> do_disconnect(client, reason, true)
     end
   end
 
   # If it's a test user, don't worry about actually disconnecting it
-  defp do_disconnect(client, reason) do
-    Logger.info("#{client.name}/##{client.userid} disconnected because #{reason}")
+  defp do_disconnect(client, reason, kick) do
+    if kick do
+      Coordinator.send_to_host(client.lobby_id, "!gkick #{client.name}")
+    end
+
+    Telemetry.log_simple_server_event(client.userid, "disconnect:#{reason}")
     Lobby.remove_user_from_any_lobby(client.userid)
     Room.remove_user_from_any_room(client.userid)
     leave_rooms(client.userid)
 
     # If they are part of a party, lets leave it
     Account.leave_party(client.party_id, client.userid)
+
+    # If a test goes wrong this can bork things and make it harder to
+    # identify what actually went wrong
+    if not Application.get_env(:teiserver, Teiserver)[:test_mode] do
+      Account.update_cache_user(client.userid, %{last_logout: Timex.now()})
+    end
 
     if client.bot do
       Telemetry.increment(:bots_disconnected)
@@ -278,7 +296,7 @@ defmodule Teiserver.Client do
     ClientLib.stop_client_server(client.userid)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "client_inout",
       %{
         channel: "client_inout",
@@ -289,7 +307,7 @@ defmodule Teiserver.Client do
     )
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{client.userid}",
       %{
         channel: "teiserver_client_messages:#{client.userid}",
@@ -298,7 +316,7 @@ defmodule Teiserver.Client do
     )
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_watch:#{client.userid}",
       %{
         channel: "teiserver_client_watch:#{client.userid}",

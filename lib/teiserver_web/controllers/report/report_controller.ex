@@ -1,6 +1,6 @@
 defmodule TeiserverWeb.Report.ReportController do
-  use CentralWeb, :controller
-  import Central.Account.AuthLib, only: [allow?: 2]
+  use TeiserverWeb, :controller
+  import Teiserver.Account.AuthLib, only: [allow?: 2]
 
   plug(AssignPlug,
     site_menu_active: "teiserver_report",
@@ -10,9 +10,8 @@ defmodule TeiserverWeb.Report.ReportController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Staff,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
-  plug(:add_breadcrumb, name: 'Teiserver', url: '/teiserver')
   plug(:add_breadcrumb, name: 'Reports', url: '/teiserver/reports')
 
   @spec show(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
@@ -48,8 +47,8 @@ defmodule TeiserverWeb.Report.ReportController do
         "accolades" ->
           Teiserver.Account.AccoladeReport
 
-        "mutes" ->
-          Teiserver.Account.MuteReport
+        "relationships" ->
+          Teiserver.Account.RelationshipReport
 
         "mapping" ->
           Teiserver.Game.MappingReport
@@ -69,6 +68,9 @@ defmodule TeiserverWeb.Report.ReportController do
         "growth" ->
           Teiserver.Account.GrowthReport
 
+        "week_on_week" ->
+          Teiserver.Account.WeekOnWeekReport
+
         "records" ->
           Teiserver.Account.RecordsReport
 
@@ -78,6 +80,9 @@ defmodule TeiserverWeb.Report.ReportController do
         "tournament" ->
           Teiserver.Account.TournamentReport
 
+        "microblog" ->
+          Teiserver.Communication.MicroblogReport
+
         # Moderation
         "moderation_activity" ->
           Teiserver.Moderation.ActivityReport
@@ -86,7 +91,7 @@ defmodule TeiserverWeb.Report.ReportController do
           raise "No handler for name of '#{name}'"
       end
 
-    if allow?(conn.current_user, module.permissions) do
+    if allow?(conn.assigns.current_user, module.permissions) do
       assigns =
         case module.run(conn, params) do
           {data, assigns} -> Map.put(assigns, :data, data)

@@ -1,5 +1,5 @@
 defmodule TeiserverWeb.Report.RatingController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
   alias Teiserver.Account
   alias Teiserver.Battle.BalanceLib
 
@@ -11,9 +11,8 @@ defmodule TeiserverWeb.Report.RatingController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Staff.Moderator,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
-  plug(:add_breadcrumb, name: 'Teiserver', url: '/teiserver')
   plug(:add_breadcrumb, name: 'Reports', url: '/teiserver/reports')
   plug(:add_breadcrumb, name: 'Reports', url: '/teiserver/reports/ratings')
 
@@ -71,7 +70,9 @@ defmodule TeiserverWeb.Report.RatingController do
         {[userid], rating_lookup[userid]}
       end)
 
-    balance_result = BalanceLib.create_balance(groups, 2)
+    opts = []
+
+    balance_result = BalanceLib.create_balance(groups, 2, opts)
 
     user_lookup =
       lookup_result

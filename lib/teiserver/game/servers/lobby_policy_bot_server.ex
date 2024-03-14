@@ -4,9 +4,9 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   """
 
   alias Phoenix.PubSub
-  alias Teiserver.{Game, User, Client, Battle, Account, Coordinator}
-  alias Teiserver.Battle.{Lobby, LobbyChat}
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  alias Teiserver.{Game, CacheUser, Client, Battle, Account, Lobby, Coordinator, Telemetry}
+  alias Teiserver.Lobby.{ChatLib}
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Teiserver.Data.Types, as: T
   use GenServer
   require Logger
@@ -89,11 +89,11 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
         %{channel: "teiserver_client_messages:" <> _, event: :added_to_lobby, lobby_id: lobby_id},
         state
       ) do
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby_id}")
 
-    PubSub.subscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
-    PubSub.subscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby_id}")
+    PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+    PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby_id}")
 
     send_chat(state, "Lobby policy bot claiming the room")
 
@@ -101,7 +101,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     new_state = %{state | lobby_id: lobby_id, founder_id: lobby.founder_id}
 
     lobby_name = generate_lobby_name(state)
-    send_chat(new_state, "$rename #{lobby_name}")
+    Battle.rename_lobby(lobby_id, lobby_name, state.userid)
 
     pick_random_map(new_state)
 
@@ -143,10 +143,12 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   def handle_info(:tick, %{lobby_id: nil} = state) do
     empty_lobby =
       Lobby.find_empty_lobby(fn l ->
-        l.passworded == false and
+        String.contains?(l.name, "ENGINE TEST") == false and
+          l.passworded == false and
           l.locked == false and
           l.tournament == false and
-          l.in_progress == false
+          l.in_progress == false and
+          not String.contains?(l.name, "ENGINE TEST")
       end)
 
     case empty_lobby do
@@ -172,7 +174,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
           leave_lobby(state)
 
         lobby.name != correct_lobby_name ->
-          send_chat(state, "$rename #{correct_lobby_name}")
+          Battle.rename_lobby(state.lobby_id, correct_lobby_name, state.userid)
           state
 
         true ->
@@ -202,7 +204,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   def handle_info(%{channel: "teiserver_lobby_updates", event: :add_user, client: client}, state) do
     generate_welcome_message(state)
     |> Enum.each(fn line ->
-      User.send_direct_message(state.userid, client.userid, line)
+      CacheUser.send_direct_message(state.userid, client.userid, line)
     end)
 
     {:noreply, state}
@@ -220,7 +222,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     new_state =
       cond do
         userid == state.founder_id ->
-          handle_founder_chat(message, state)
+          handle_founder_chat(message, userid, state)
 
         userid == state.userid ->
           state
@@ -262,8 +264,9 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   @spec handle_user_chat(T.userid(), String.t(), map()) :: map()
   defp handle_user_chat(senderid, "!boss" <> rem, state) do
     if String.trim(rem) != "" do
-      LobbyChat.say(senderid, "!ev", state.lobby_id)
+      ChatLib.say(senderid, "!ev", state.lobby_id)
       Lobby.kick_user_from_battle(senderid, state.lobby_id)
+      Telemetry.log_simple_server_event(senderid, "lobby_policy.kicked_for_bossing")
     end
 
     state
@@ -271,7 +274,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
 
   defp handle_user_chat(senderid, "!preset" <> rem, state) do
     if String.trim(rem) != state.lobby_policy.preset do
-      LobbyChat.say(senderid, "!ev", state.lobby_id)
+      ChatLib.say(senderid, "!ev", state.lobby_id)
     end
 
     state
@@ -280,7 +283,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   defp handle_user_chat(senderid, "Lobby policy bot claiming the room", state) do
     sender = Account.get_user_by_id(senderid)
 
-    if User.is_bot?(sender) and User.is_moderator?(sender) do
+    if CacheUser.is_bot?(sender) and CacheUser.is_moderator?(sender) do
       if state.userid > senderid do
         send_dm(state, senderid, "I am senior, leave the lobby")
       else
@@ -296,8 +299,8 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     state
   end
 
-  @spec handle_founder_chat(String.t(), map()) :: map()
-  defp handle_founder_chat("* BarManager|" <> json_str, state) do
+  @spec handle_founder_chat(String.t(), T.userid(), map()) :: map()
+  defp handle_founder_chat("* BarManager|" <> json_str, userid, state) do
     case Jason.decode(json_str) do
       {:ok, %{"BattleStateChanged" => new_status}} ->
         if new_status["locked"] != "unlocked" do
@@ -358,14 +361,14 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
         :ok
 
       err ->
-        Logger.error("BarManager bad json - #{json_str}\n#{inspect(err)}")
+        Logger.error("BarManager bad json from #{userid} - #{json_str}\n#{inspect(err)}")
         :ok
     end
 
     state
   end
 
-  defp handle_founder_chat("* Map changed by " <> user_and_map, state) do
+  defp handle_founder_chat("* Map changed by " <> user_and_map, _userid, state) do
     [_user | map_parts] =
       user_and_map
       |> String.split(" ")
@@ -386,6 +389,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
 
   defp handle_founder_chat(
          "* Automatic random map rotation: next map is" <> map_and_quotes,
+         _userid,
          state
        ) do
     current_map =
@@ -400,12 +404,12 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     state
   end
 
-  defp handle_founder_chat("* Boss mode enabled for " <> _boss_name, state) do
+  defp handle_founder_chat("* Boss mode enabled for " <> _boss_name, _userid, state) do
     send_to_founder(state, "!boss")
     state
   end
 
-  defp handle_founder_chat(_, state) do
+  defp handle_founder_chat(_, _userid, state) do
     state
   end
 
@@ -415,7 +419,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     # making sure there's no issue we just leave the lobby anyway
     sender = Account.get_user_by_id(senderid)
 
-    if User.is_bot?(sender) and User.is_moderator?(sender) do
+    if CacheUser.is_bot?(sender) and CacheUser.is_moderator?(sender) do
       send(self(), :leave_lobby)
     end
 
@@ -423,8 +427,16 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   end
 
   defp handle_direct_message(senderid, "$leave", state) do
-    if User.is_moderator?(senderid) do
+    if CacheUser.is_moderator?(senderid) do
       send(self(), :leave_lobby)
+    end
+
+    state
+  end
+
+  defp handle_direct_message(senderid, "$quit", state) do
+    if CacheUser.is_moderator?(senderid) do
+      Client.disconnect(state.userid, "Bot disconnect")
     end
 
     state
@@ -446,23 +458,23 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
 
   # Funcs to do stuff
   defp send_chat(state, msg) do
-    LobbyChat.say(state.userid, msg, state.lobby_id)
+    ChatLib.say(state.userid, msg, state.lobby_id)
   end
 
   defp send_dm(state, userid, msg) do
-    User.send_direct_message(state.userid, userid, msg)
+    CacheUser.send_direct_message(state.userid, userid, msg)
   end
 
   defp send_to_founder(state, msg) do
-    User.send_direct_message(state.userid, state.founder_id, msg)
+    CacheUser.send_direct_message(state.userid, state.founder_id, msg)
   end
 
   @spec leave_lobby(map()) :: map()
   defp leave_lobby(%{lobby_id: nil} = state), do: state
 
   defp leave_lobby(state) do
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_updates:#{state.lobby_id}")
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_chat:#{state.lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{state.lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{state.lobby_id}")
 
     Lobby.remove_user_from_battle(state.userid, state.lobby_id)
 
@@ -525,8 +537,8 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
   def init(data) do
     id = data.lobby_policy.id
 
-    :ok = PubSub.subscribe(Central.PubSub, "lobby_policy_internal:#{id}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_client_messages:#{data.userid}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "lobby_policy_internal:#{id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_client_messages:#{data.userid}")
 
     Horde.Registry.register(
       Teiserver.LobbyPolicyRegistry,
@@ -535,7 +547,7 @@ defmodule Teiserver.Game.LobbyPolicyBotServer do
     )
 
     {user, _client} =
-      case User.internal_client_login(data.userid) do
+      case CacheUser.internal_client_login(data.userid) do
         {:ok, user, client} -> {user, client}
         :error -> raise "No user found"
       end

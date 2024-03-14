@@ -1,5 +1,6 @@
 defmodule TeiserverWeb.Live.ClientTest do
-  use CentralWeb.ConnCase, async: false
+  @moduledoc false
+  use TeiserverWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
 
   alias Teiserver.Client

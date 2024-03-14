@@ -24,19 +24,15 @@
         </h3>
 
         <ul>
-          <li>Bot: <%= @user.bot %></li>
-          <li>Moderator: <%= @user.moderator %></li>
-          <li>Verified: <%= @user.verified %></li>
+          <li>Bot: <%= Teiserver.CacheUser.is_bot?(@user) %></li>
+          <li>Moderator: <%= Teiserver.CacheUser.is_moderator?(@user) %></li>
           <li>
             Battle:
             <%= if @client != nil and @client.lobby_id != nil do %>
               <%= live_redirect("Battle ##{@client.lobby_id}",
                 to: Routes.ts_battle_lobby_show_path(@socket, :show, @client.lobby_id),
                 class: ""
-              ) %>
-
-              &nbsp;&nbsp;&nbsp;
-
+              ) %> &nbsp;&nbsp;&nbsp;
               <%= if @current_client do %>
                 <span phx-click="join-lobby" class={"btn btn-#{bsname} btn-sm"}>
                   Join

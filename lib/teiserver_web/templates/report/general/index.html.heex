@@ -1,59 +1,29 @@
 <div class="row mt-2">
-  <div class="col-md-12">
-    <h4>Raw data</h4>
-  </div>
-
   <%= if allow?(@current_user, "Server") do %>
-    <%= central_component("menu_card",
-      size: :small,
-      icon: Teiserver.Telemetry.ClientEventLib.icon(),
-      name: "client_event",
-      text: "Client events",
-      link: Routes.ts_reports_client_event_path(@conn, :summary)
-    ) %>
-  <% end %>
+    <div class="col-md-12">
+      <h4>Metrics</h4>
+    </div>
 
-  <%= if allow?(@current_user, "Admin") do %>
-    <%= central_component("menu_card",
-      size: :small,
-      icon: Teiserver.Telemetry.ServerDayLogLib.icon(),
-      name: "server_metric",
-      text: "Server metrics",
-      link: ~p"/reports/server/list"
-    ) %>
-  <% end %>
+    <%= if allow?(@current_user, "Admin") do %>
+      <%= central_component("menu_card",
+        size: :small,
+        icon: Teiserver.Account.RatingLib.icon(),
+        name: "ratings",
+        text: "Ratings",
+        link: Routes.ts_reports_rating_path(@conn, :distribution_table)
+      ) %>
+    <% end %>
 
-  <%= if allow?(@current_user, "Admin") do %>
-    <%= central_component("menu_card",
-      size: :small,
-      icon: Teiserver.Battle.MatchLib.icon(),
-      name: "match_metrics",
-      text: "Match metrics",
-      link: Routes.ts_reports_match_metric_path(@conn, :day_metrics_list)
-    ) %>
-  <% end %>
+    <%= if allow?(@current_user, "Engine") do %>
+      <%= central_component("menu_card",
+        size: :small,
+        icon: Teiserver.Telemetry.InfologLib.icon(),
+        name: "infolog",
+        text: "Infologs",
+        link: ~p"/telemetry/infolog"
+      ) %>
+    <% end %>
 
-  <%= if allow?(@current_user, "Admin") do %>
-    <%= central_component("menu_card",
-      size: :small,
-      icon: Teiserver.Account.RatingLib.icon(),
-      name: "ratings",
-      text: "Ratings",
-      link: Routes.ts_reports_rating_path(@conn, :distribution_table)
-    ) %>
-  <% end %>
-
-  <%= if allow?(@current_user, "Engine") do %>
-    <%= central_component("menu_card",
-      size: :small,
-      icon: Teiserver.Telemetry.InfologLib.icon(),
-      name: "infolog",
-      text: "Infologs",
-      link: Routes.ts_reports_infolog_path(@conn, :index)
-    ) %>
-  <% end %>
-
-  <%= if allow?(@current_user, "Server") do %>
     <%= central_component("menu_card",
       size: :small,
       icon: "fa-regular fa-download",
@@ -62,9 +32,7 @@
       link: Routes.ts_reports_exports_path(@conn, :index)
     ) %>
   <% end %>
-</div>
 
-<div class="row mt-2">
   <div class="col-md-12">
     <h4>Individual users</h4>
   </div>
@@ -79,13 +47,13 @@
     ) %>
   <% end %>
 
-  <%= if allow?(@current_user, Teiserver.Account.MuteReport.permissions()) do %>
+  <%= if allow?(@current_user, Teiserver.Account.RelationshipReport.permissions()) do %>
     <%= central_component("menu_card",
       size: :small,
-      icon: Teiserver.Account.MuteReport.icon(),
-      name: "mutes",
-      text: "Mutes",
-      link: Routes.ts_reports_report_path(@conn, :show, "mutes")
+      icon: Teiserver.Account.RelationshipReport.icon(),
+      name: "relationships",
+      text: "Relationships",
+      link: Routes.ts_reports_report_path(@conn, :show, "relationships")
     ) %>
   <% end %>
 
@@ -204,6 +172,16 @@
       link: Routes.ts_reports_report_path(@conn, :show, "growth")
     ) %>
   <% end %>
+
+  <%= if allow?(@current_user, Teiserver.Account.WeekOnWeekReport.permissions()) do %>
+    <%= central_component("menu_card",
+      size: :small,
+      icon: Teiserver.Account.WeekOnWeekReport.icon(),
+      name: "week_on_week",
+      text: "Week on Week",
+      link: Routes.ts_reports_report_path(@conn, :show, "week_on_week")
+    ) %>
+  <% end %>
 </div>
 
 <div class="row mt-2">
@@ -211,7 +189,7 @@
     <h4>Other</h4>
   </div>
 
-  <%= if allow?(@current_user, Teiserver.Account.AccoladeReport.permissions()) and Application.get_env(:central, Teiserver)[:enable_accolade_mode] == true do %>
+  <%= if allow?(@current_user, Teiserver.Account.AccoladeReport.permissions()) and Application.get_env(:teiserver, Teiserver)[:enable_accolade_mode] == true do %>
     <%= central_component("menu_card",
       size: :small,
       icon: Teiserver.Account.AccoladeReport.icon(),
@@ -280,6 +258,15 @@
       link: Routes.ts_reports_report_path(@conn, :show, "moderation_activity")
     ) %>
   <% end %>
+
+  <.menu_card
+    :if={allow?(@current_user, Teiserver.Communication.MicroblogReport.permissions())}
+    icon={Teiserver.Communication.MicroblogReport.icon()}
+    url={~p"/teiserver/reports/show/microblog"}
+    size={:small}
+  >
+    Microblog
+  </.menu_card>
 </div>
 
 <div class="row mt-2">
@@ -289,6 +276,6 @@
     name: "",
     icon: StylingHelper.icon(:back),
     text: "Back",
-    link: Routes.ts_general_general_path(@conn, :index)
+    link: ~p"/"
   ) %>
 </div>

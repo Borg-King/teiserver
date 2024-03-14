@@ -11,12 +11,14 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> TSAuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
-    client = Account.get_client_by_id(socket.assigns.user_id)
+    client = Account.get_client_by_id(socket.assigns.current_user.id)
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_client_messages:#{socket.assigns.user_id}")
+    :ok =
+      PubSub.subscribe(
+        Teiserver.PubSub,
+        "teiserver_client_messages:#{socket.assigns.current_user.id}"
+      )
 
     admin_mode =
       cond do
@@ -34,7 +36,6 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
       |> assign(:mode, mode)
       |> assign(:client, client)
       |> assign(:site_menu_active, "parties")
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
       |> assign(:view_colour, PartyLib.colours())
       |> assign(:user_lookup, %{})
       |> list_parties()
@@ -45,7 +46,7 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
 
   @impl true
   def handle_params(_, _, %{assigns: %{current_user: nil}} = socket) do
-    {:noreply, socket |> redirect(to: Routes.general_page_path(socket, :index))}
+    {:noreply, socket |> redirect(to: ~p"/")}
   end
 
   def handle_params(_, _, socket) do
@@ -53,13 +54,8 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
   end
 
   @impl true
-  def render(assigns) do
-    Phoenix.View.render(TeiserverWeb.Account.PartyLiveView, "index.html", assigns)
-  end
-
-  @impl true
   def handle_info(%{channel: "teiserver_party:" <> party_id, event: :closed}, socket) do
-    :ok = PubSub.unsubscribe(Central.PubSub, "teiserver_party:#{party_id}")
+    :ok = PubSub.unsubscribe(Teiserver.PubSub, "teiserver_party:#{party_id}")
 
     new_parties =
       socket.assigns.parties
@@ -98,7 +94,7 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
   def handle_info(%{channel: "teiserver_client_messages:" <> _, event: :connected}, socket) do
     {:noreply,
      socket
-     |> assign(:client, Account.get_client_by_id(socket.assigns.user_id))}
+     |> assign(:client, Account.get_client_by_id(socket.assigns.current_user.id))}
   end
 
   def handle_info(%{channel: "teiserver_client_messages:" <> _, event: :disconnected}, socket) do
@@ -129,18 +125,18 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
 
   @impl true
   def handle_event("invite:accept", %{"party_id" => party_id}, socket) do
-    PartyLib.call_party(party_id, {:accept_invite, socket.assigns.user_id})
+    PartyLib.call_party(party_id, {:accept_invite, socket.assigns.current_user.id})
     :timer.sleep(100)
     {:noreply, socket |> redirect(to: Routes.ts_game_party_show_path(socket, :show, party_id))}
   end
 
   def handle_event("invite:decline", %{"party_id" => party_id}, socket) do
-    PartyLib.cast_party(party_id, {:cancel_invite, socket.assigns.user_id})
+    PartyLib.cast_party(party_id, {:cancel_invite, socket.assigns.current_user.id})
     {:noreply, socket}
   end
 
   def handle_event("create_party", _, socket) do
-    party = Account.create_party(socket.assigns.user_id)
+    party = Account.create_party(socket.assigns.current_user.id)
     :timer.sleep(100)
     {:noreply, socket |> redirect(to: Routes.ts_game_party_show_path(socket, :show, party.id))}
   end
@@ -153,7 +149,7 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
 
     parties
     |> Enum.each(fn party ->
-      :ok = PubSub.subscribe(Central.PubSub, "teiserver_party:#{party.id}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_party:#{party.id}")
     end)
 
     socket
@@ -162,10 +158,9 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
 
   defp list_parties(socket) do
     parties =
-      socket.assigns.user_id
-      |> Account.get_user_by_id()
-      |> Map.get(:friends)
-      |> Kernel.++([socket.assigns.user_id])
+      socket.assigns.current_user.id
+      |> Account.list_friend_ids_of_user()
+      |> Kernel.++([socket.assigns.current_user.id])
       |> Enum.map(fn user_id -> Account.get_client_by_id(user_id) end)
       |> Enum.reject(&(&1 == nil))
       |> Enum.map(fn c -> c.party_id end)
@@ -176,7 +171,7 @@ defmodule TeiserverWeb.Account.PartyLive.Index do
 
     parties
     |> Enum.each(fn party ->
-      :ok = PubSub.subscribe(Central.PubSub, "teiserver_party:#{party.id}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_party:#{party.id}")
     end)
 
     socket

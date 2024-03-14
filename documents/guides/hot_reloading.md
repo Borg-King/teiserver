@@ -13,11 +13,11 @@ I highly recommend you read [A guide to hot code reloading in Elixir](https://bl
 ```python
 #!/usr/bin/env python3
 # Example usage:
-# hot_reload Central.Helpers.TimexHelper Teiserver.Coordinator.ConsulCommands
+# hot_reload Teiserver.Helper.TimexHelper Teiserver.Coordinator.ConsulCommands
 
 import os, sys
 
-hot_path = "hot_reload/opt/build/_build/prod/lib/central/ebin"
+hot_path = "hot_reload/opt/build/_build/prod/lib/teiserver/ebin"
 
 def do_build():
     os.system("sh scripts/build_container.sh")
@@ -30,7 +30,7 @@ def do_build():
 
 def upload_file(name):
     os.system(
-        f"scp -i rsa_key_path {hot_path}/Elixir.{name}.beam user@address:/apps/central/lib/central-0.1.0/ebin")
+        f"scp -i rsa_key_path {hot_path}/Elixir.{name}.beam user@address:/apps/teiserver/lib/teiserver-0.1.0/ebin")
 
 if __name__ == '__main__':
   module_list = sys.argv[1:]
@@ -40,13 +40,10 @@ if __name__ == '__main__':
     # Upload
     for module in module_list:
         upload_file(module)
-    
+
     # Print out instructions
-    instructions = "ssh to server\n---\ncentralapp remote"
-    for module in module_list:
-      instructions += f"\n:code.load_file({module})"
-      instructions += f"\n:code.purge({module})"
-      instructions += f"\n:code.load_file({module})"
+    instructions = "ssh to server\n---\ntsapp remote"
+    instructions += f"\nTeiserver.hot_reload([" + ", ".join(module_list) + "])"
 
     print(instructions)
 ```

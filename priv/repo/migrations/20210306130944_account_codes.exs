@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.AccountCodes do
+defmodule Teiserver.Repo.Migrations.AccountCodes do
   use Ecto.Migration
 
   def change do
@@ -7,6 +7,7 @@ defmodule Central.Repo.Migrations.AccountCodes do
       # E.g. password reset
       add :purpose, :string
       add :expires, :utc_datetime
+      add :metadata, :jsonb
 
       add :user_id, references(:account_users, on_delete: :nothing)
       timestamps()

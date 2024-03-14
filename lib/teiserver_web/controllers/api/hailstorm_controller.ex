@@ -1,12 +1,14 @@
 defmodule TeiserverWeb.API.HailstormController do
-  use CentralWeb, :controller
-  alias Teiserver.Config
-  alias Teiserver.{Account, User}
+  use TeiserverWeb, :controller
+  alias Teiserver.{Account, CacheUser, Config, Coordinator, Lobby}
+  alias Teiserver.Game.MatchRatingLib
+  alias Teiserver.Battle.BalanceLib
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   plug(Bodyguard.Plug.Authorize,
     policy: Teiserver.API.HailstormAuth,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
   )
 
   @spec start(Plug.Conn.t(), map()) :: Plug.Conn.t()
@@ -27,29 +29,29 @@ defmodule TeiserverWeb.API.HailstormController do
     result =
       case Account.get_user_by_email(email) do
         nil ->
-          case User.register_user(name, email, params["password"]) do
+          case CacheUser.register_user(name, email, params["password"]) do
             :success ->
               db_user = Account.get_user!(nil, search: [email: email])
-              Central.Account.update_user(db_user, params["permissions"] || [], :permissions)
+              Account.script_update_user(db_user, params["permissions"] || [])
 
               # Specific updates
-              User.add_roles(db_user.id, params["roles"])
+              CacheUser.add_roles(db_user.id, params["roles"])
 
               %{userid: db_user.id}
 
             {:error, reason} ->
               %{
                 result: "failure",
-                stage: "User.register_user",
+                stage: "CacheUser.register_user",
                 reason: reason
               }
           end
 
         user ->
           # Update the user
-          User.add_roles(user.id, params["roles"])
+          CacheUser.add_roles(user.id, params["roles"])
 
-          User.set_flood_level(user.id, 0)
+          CacheUser.set_flood_level(user.id, 0)
           %{userid: user.id}
       end
 
@@ -134,11 +136,74 @@ defmodule TeiserverWeb.API.HailstormController do
     |> assign(:result, result)
     |> render("result.json")
   end
+
+  @spec update_user_rating(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def update_user_rating(conn, params) do
+    rating_type_id = MatchRatingLib.rating_type_name_lookup()[params["rating_type"]]
+    skill = int_parse(params["skill"])
+    uncertainty = int_parse(params["uncertainty"])
+
+    rating_value = BalanceLib.calculate_rating_value(skill, uncertainty)
+    leaderboard_rating = BalanceLib.calculate_leaderboard_rating(skill, uncertainty)
+
+    {:ok, rating} =
+      Account.create_or_update_rating(%{
+        user_id: params["userid"],
+        rating_type_id: rating_type_id,
+        rating_value: rating_value,
+        skill: skill,
+        uncertainty: uncertainty,
+        leaderboard_rating: leaderboard_rating,
+        last_updated: Timex.now()
+      })
+
+    result =
+      Map.take(
+        rating,
+        ~w(user_id rating_type_id rating_value skill uncertainty leaderboard_rating last_updated)a
+      )
+
+    conn
+    |> put_status(201)
+    |> assign(:result, result)
+    |> render("result.json")
+  end
+
+  @spec get_server_state(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def get_server_state(conn, %{"server" => server, "id" => id_str}) do
+    id = int_parse(id_str)
+
+    result =
+      case server do
+        "client" ->
+          client = Account.get_client_by_id(id)
+          user = Account.get_user_by_id(id)
+          Map.put(client, :user, user)
+
+        "lobby" ->
+          Lobby.get_lobby(id)
+
+        "balance" ->
+          pid = Coordinator.get_balancer_pid(id)
+          state = :sys.get_state(pid)
+
+          current_balance = Map.get(state.hashes, state.last_balance_hash, nil)
+          Map.put(state, "current_balance", current_balance)
+
+        _ ->
+          raise "No server of type #{server}"
+      end
+
+    conn
+    |> put_status(201)
+    |> assign(:result, result)
+    |> render("result.json")
+  end
 end
 
 defmodule Teiserver.API.HailstormAuth do
   @spec authorize(Atom.t(), Plug.Conn.t(), Map.t()) :: Boolean.t()
   def authorize(_, _, _) do
-    Application.get_env(:central, Teiserver)[:enable_hailstorm]
+    Application.get_env(:teiserver, Teiserver)[:enable_hailstorm]
   end
 end

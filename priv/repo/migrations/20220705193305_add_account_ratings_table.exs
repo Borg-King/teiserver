@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.AddAccountRatingsTable do
+defmodule Teiserver.Repo.Migrations.AddAccountRatingsTable do
   use Ecto.Migration
 
   def change do
@@ -13,6 +13,7 @@ defmodule Central.Repo.Migrations.AddAccountRatingsTable do
       add :uncertainty, :float
 
       add :last_updated, :timestamp
+      add :leaderboard_rating, :float
     end
 
     create index(:teiserver_account_ratings, [:user_id])

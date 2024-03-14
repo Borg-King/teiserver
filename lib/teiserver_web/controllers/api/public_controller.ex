@@ -1,5 +1,5 @@
 defmodule TeiserverWeb.API.PublicController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
   alias Teiserver.Game.MatchRatingLib
   alias Teiserver.Account
 
@@ -25,12 +25,13 @@ defmodule TeiserverWeb.API.PublicController do
             ],
             order_by: "Leaderboard rating high to low",
             preload: [:user],
-            limit: 30
+            limit: 100
           )
           |> Enum.map(fn rating ->
             %{
               name: rating.user.name,
               icon: rating.user.icon,
+              country: Map.get(rating.user.data, "country", "??"),
               colour: rating.user.colour,
               rating: rating.leaderboard_rating,
               age: Timex.diff(Timex.now(), rating.last_updated, :days)

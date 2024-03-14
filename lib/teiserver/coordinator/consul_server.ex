@@ -5,12 +5,22 @@ defmodule Teiserver.Coordinator.ConsulServer do
   """
   use GenServer
   require Logger
-  alias Teiserver.{Account, Coordinator, Client, User, Battle}
-  alias Teiserver.Battle.{Lobby, LobbyChat}
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
-  alias Teiserver.Config
+
+  alias Teiserver.{
+    Account,
+    Coordinator,
+    Client,
+    CacheUser,
+    Lobby,
+    Battle,
+    Telemetry,
+    Config,
+    Communication
+  }
+
+  alias Teiserver.Lobby.{ChatLib}
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Phoenix.PubSub
-  alias Teiserver.Bridge.BridgeServer
   alias Teiserver.Battle.BalanceLib
   alias Teiserver.Data.Types, as: T
   alias Teiserver.Coordinator.{ConsulCommands, CoordinatorLib, SpadsParser}
@@ -18,10 +28,12 @@ defmodule Teiserver.Coordinator.ConsulServer do
   # Commands that are always forwarded to the coordinator itself, not the consul server
   @coordinator_bot ~w(whoami whois check discord help coc ignore mute ignore unmute unignore matchmaking website party modparty unparty)
 
-  @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? explain newlobby jazlobby tournament)
-  @boss_commands ~w(gatekeeper welcome-message meme reset-approval rename resetplaylevels minplaylevel maxplaylevel setplaylevels resetratinglevels minratinglevel maxratinglevel setratinglevels)
+  @always_allow ~w(status s y n follow joinq leaveq splitlobby afks roll players password? newlobby jazlobby tournament)
+  @boss_commands ~w(balancemode gatekeeper welcome-message meme reset-approval rename resetratinglevels minratinglevel maxratinglevel setratinglevels)
   @vip_boss_commands ~w(shuffle)
-  @host_commands ~w(specunready makeready settag speclock forceplay lobbyban lobbybanmult unban forcespec forceplay lock unlock)
+  @host_commands ~w(specunready makeready settag speclock forceplay lobbyban lobbybanmult unban forcespec forceplay lock unlock makebalance)
+
+  # @handled_by_lobby ~w(explain)
 
   @splitter "########################################"
 
@@ -121,11 +133,15 @@ defmodule Teiserver.Coordinator.ConsulServer do
   def handle_info(:recheck_membership, state) do
     Battle.get_lobby_member_list(state.lobby_id)
     |> Enum.each(fn userid ->
+      client = Account.get_client_by_id(userid)
+
       cond do
         allow_join(userid, state) |> elem(0) == false ->
+          Telemetry.log_simple_server_event(userid, "lobby.recheck_membership_kick")
           Lobby.kick_user_from_battle(userid, state.lobby_id)
 
-        user_allowed_to_play?(userid, state) == false ->
+        client.player && user_allowed_to_play?(userid, state) == false ->
+          Telemetry.log_simple_server_event(userid, "lobby.recheck_membership_spectate")
           Lobby.force_change_client(state.coordinator_id, userid, %{player: false})
 
         true ->
@@ -154,7 +170,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
         unready_at: System.system_time(:millisecond)
       })
 
-      if User.is_restricted?(userid, ["All chat", "Battle chat"]) do
+      if CacheUser.is_restricted?(userid, ["All chat", "Battle chat"]) do
         name = Account.get_username_by_id(userid)
         Coordinator.send_to_host(state.coordinator_id, state.lobby_id, "!mute #{name}")
       end
@@ -184,7 +200,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     new_approved = [userid | state.approved_users] |> Enum.uniq()
 
     username = Account.get_username(userid)
-    LobbyChat.persist_system_message("#{username} joined the lobby", state.lobby_id)
+    ChatLib.persist_system_message("#{username} joined the lobby", state.lobby_id)
 
     {:noreply,
      %{
@@ -196,7 +212,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def handle_info({:user_left, userid}, state) do
     username = Account.get_username(userid)
-    LobbyChat.persist_system_message("#{username} left the lobby", state.lobby_id)
+    ChatLib.persist_system_message("#{username} left the lobby", state.lobby_id)
 
     player_count_changed(state)
 
@@ -212,7 +228,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def handle_info({:user_kicked, userid}, state) do
     username = Account.get_username(userid)
-    LobbyChat.persist_system_message("#{username} kicked from the lobby", state.lobby_id)
+    ChatLib.persist_system_message("#{username} kicked from the lobby", state.lobby_id)
 
     player_count_changed(state)
 
@@ -273,7 +289,10 @@ defmodule Teiserver.Coordinator.ConsulServer do
           if client.lobby_id == state.lobby_id or client.lobby_id == nil do
             # If the first splitter is still in this lobby, move them to a new one
             # with the same engine version as the starting lobby
-            Lobby.find_empty_lobby(fn a -> a.engine_version == old_lobby.engine_version end)
+            Lobby.find_empty_lobby(fn a ->
+              a.engine_version == old_lobby.engine_version and
+                a.passworded == false
+            end)
           else
             %{id: client.lobby_id}
           end
@@ -281,21 +300,21 @@ defmodule Teiserver.Coordinator.ConsulServer do
         # If the first splitter is still in this lobby, move them to a new one
         cond do
           Enum.empty?(players_to_move) ->
-            LobbyChat.sayex(
+            ChatLib.sayex(
               state.coordinator_id,
               "Split failed, nobody followed the split leader",
               state.lobby_id
             )
 
           Enum.count(players_to_move) < split.min_players ->
-            LobbyChat.sayex(
+            ChatLib.sayex(
               state.coordinator_id,
               "Split failed, not enough players agreed to split (#{Enum.count(players_to_move) + 1}/#{split.min_players})",
               state.lobby_id
             )
 
           new_lobby == nil ->
-            LobbyChat.sayex(
+            ChatLib.sayex(
               state.coordinator_id,
               "Split failed, unable to find empty lobby",
               state.lobby_id
@@ -317,7 +336,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
               Lobby.force_add_user_to_lobby(userid, lobby_id)
             end)
 
-            LobbyChat.sayex(state.coordinator_id, "Split completed.", state.lobby_id)
+            ChatLib.sayex(state.coordinator_id, "Split completed.", state.lobby_id)
         end
 
         %{state | split: nil}
@@ -330,7 +349,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     {:noreply, new_state}
   end
 
-  def handle_info(cmd = %{command: command}, state) do
+  def handle_info(%{command: command} = cmd, state) do
     cond do
       Enum.member?(@coordinator_bot, command) ->
         Coordinator.cast_coordinator(
@@ -354,6 +373,21 @@ defmodule Teiserver.Coordinator.ConsulServer do
       ) do
     player_count_changed(state)
     {:noreply, state}
+  end
+
+  def handle_info(
+        %{channel: "teiserver_lobby_updates", event: :remove_user, client: _client},
+        state
+      ) do
+    new_player_count = get_player_count(state)
+
+    if new_player_count == 0 do
+      new_state = %{state | minimum_rating_to_play: 0, maximum_rating_to_play: 1000}
+
+      {:noreply, new_state}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info(%{channel: "teiserver_lobby_updates", event: :add_user, client: client}, state) do
@@ -412,7 +446,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     end
 
     # If the client is muted, we need to tell the host
-    if User.is_restricted?(client.userid, ["All chat", "Battle chat"]) do
+    if CacheUser.is_restricted?(client.userid, ["All chat", "Battle chat"]) do
       spawn(fn ->
         :timer.sleep(500)
         Coordinator.send_to_host(state.coordinator_id, state.lobby_id, "!mute #{client.name}")
@@ -441,18 +475,18 @@ defmodule Teiserver.Coordinator.ConsulServer do
       # If they're not allowed to be a boss, unboss them?
       (host_data[:host_bosses] || [])
       |> Enum.filter(fn userid ->
-        User.is_restricted?(userid, ["Boss"])
+        CacheUser.is_restricted?(userid, ["Boss"])
       end)
       |> Enum.each(fn userid ->
         username = Account.get_username_by_id(userid)
 
-        LobbyChat.say(
+        ChatLib.say(
           state.coordinator_id,
           "#{username} is not allowed to be a boss",
           state.lobby_id
         )
 
-        LobbyChat.say(userid, "!boss", state.lobby_id)
+        ChatLib.say(userid, "!boss", state.lobby_id)
       end)
 
       player_count_changed(new_state)
@@ -477,20 +511,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
     {:noreply, new_state}
   end
 
-  def handle_info(%{channel: "teiserver_server", event: "stop"}, state) do
-    Lobby.say(
-      state.coordinator_id,
-      "Teiserver update taking place, see discord for details/issues.",
-      state.lobby_id
-    )
-
-    {:noreply, state}
-  end
-
-  def handle_info(%{channel: "teiserver_server"}, state) do
-    {:noreply, state}
-  end
-
   # Chat handler
   @spec handle_lobby_chat(T.userid(), String.t(), map()) :: map()
   defp handle_lobby_chat(
@@ -507,20 +527,20 @@ defmodule Teiserver.Coordinator.ConsulServer do
       [now | user_times]
       |> Enum.filter(fn cmd_ts -> cmd_ts > limiter end)
 
-    user = User.get_user_by_id(userid)
+    user = CacheUser.get_user_by_id(userid)
 
     cond do
-      User.is_moderator?(user) ->
+      CacheUser.is_moderator?(user) ->
         :ok
 
       Enum.count(new_user_times) >= state.ring_limit_count ->
-        User.set_flood_level(userid, 100)
+        CacheUser.set_flood_level(userid, 100)
         Client.disconnect(userid, "Ring flood")
 
       Enum.count(new_user_times) >= state.ring_limit_count - 1 ->
-        User.ring(userid, state.coordinator_id)
+        CacheUser.ring(userid, state.coordinator_id)
 
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           userid,
           "Attention #{user.name}, you are ringing a lot of people very fast, please pause for a bit",
@@ -540,13 +560,13 @@ defmodule Teiserver.Coordinator.ConsulServer do
     is_boss = Enum.member?(state.host_bosses, userid)
 
     if not is_boss do
-      User.send_direct_message(
+      CacheUser.send_direct_message(
         state.coordinator_id,
         userid,
         "Setting tweakdefs requires boss privileges"
       )
 
-      LobbyChat.say(userid, "!ev", state.lobby_id)
+      ChatLib.say(userid, "!ev", state.lobby_id)
     end
 
     state
@@ -556,13 +576,13 @@ defmodule Teiserver.Coordinator.ConsulServer do
     is_boss = Enum.member?(state.host_bosses, userid)
 
     if not is_boss do
-      User.send_direct_message(
+      CacheUser.send_direct_message(
         state.coordinator_id,
         userid,
         "Setting tweakunits requires boss privileges"
       )
 
-      LobbyChat.say(userid, "!ev", state.lobby_id)
+      ChatLib.say(userid, "!ev", state.lobby_id)
     end
 
     state
@@ -575,7 +595,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
       |> String.downcase()
 
     is_boss = Enum.member?(state.host_bosses, userid)
-    is_moderator = User.is_moderator?(userid)
+    is_moderator = CacheUser.is_moderator?(userid)
 
     # If it's CV then strip that out!
     [cmd | args] = String.split(trimmed_msg, " ")
@@ -598,7 +618,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
           if not is_boss and not is_moderator do
             spawn(fn ->
               :timer.sleep(300)
-              LobbyChat.say(userid, "!ev", state.lobby_id)
+              ChatLib.say(userid, "!ev", state.lobby_id)
             end)
           end
         end
@@ -653,7 +673,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     new_client =
       if existing.player == false and new_client.player == true and
            get_player_count(state) >= get_max_player_count(state) do
-        LobbyChat.say(userid, "$joinq", state.lobby_id)
+        ChatLib.say(userid, "$joinq", state.lobby_id)
         %{new_client | player: false}
       else
         new_client
@@ -740,9 +760,9 @@ defmodule Teiserver.Coordinator.ConsulServer do
         Enum.empty?(get_queue(state)) ->
           {change, new_client}
 
-        # Made redundant from the LobbyChat.say("$joinq") above
+        # Made redundant from the ChatLib.say("$joinq") above
         # hd(get_queue(state)) != userid and new_client.player == true and existing.player == false ->
-        #   LobbyChat.sayprivateex(state.coordinator_id, userid, "You are not part of the join queue so cannot become a player. Add yourself to the queue by chatting $joinq", state.lobby_id)
+        #   ChatLib.sayprivateex(state.coordinator_id, userid, "You are not part of the join queue so cannot become a player. Add yourself to the queue by chatting $joinq", state.lobby_id)
         #   {false, nil}
 
         true ->
@@ -753,7 +773,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
     if change do
       if existing.player == true and new_client.player == false do
         if Enum.member?(get_queue(state), existing.userid) do
-          LobbyChat.say(userid, "$leaveq", state.lobby_id)
+          ChatLib.say(userid, "$leaveq", state.lobby_id)
         end
 
         send(self(), :tick)
@@ -804,10 +824,20 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   @spec user_allowed_to_play?(T.user(), T.client(), map()) :: boolean()
   defp user_allowed_to_play?(user, client, state) do
+    player_list = list_players(state)
+
     {player_rating, player_uncertainty} =
       BalanceLib.get_user_rating_value_uncertainty_pair(user.id, "Team")
 
     player_rating = max(player_rating, 1)
+    avoid_status = Account.check_avoid_status(user.id, player_list)
+
+    boss_avoid_status =
+      state.host_bosses
+      |> Stream.map(fn boss_id ->
+        Account.does_a_avoid_b?(boss_id, user.id)
+      end)
+      |> Enum.any?()
 
     cond do
       state.minimum_rating_to_play != nil and player_rating < state.minimum_rating_to_play ->
@@ -833,45 +863,68 @@ defmodule Teiserver.Coordinator.ConsulServer do
       not Enum.empty?(client.queues) ->
         false
 
+      Account.is_moderator?(user) ->
+        true
+
+      avoid_status == :avoiding ->
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(user.id, match_id, "play_refused.avoiding")
+        false
+
+      avoid_status == :avoided ->
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(user.id, match_id, "play_refused.avoided")
+        false
+
+      boss_avoid_status == true ->
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(user.id, match_id, "play_refused.boss_avoided")
+        false
+
       true ->
         true
     end
   end
 
   def is_on_friendlist?(userid, state, :players) do
-    battle = Battle.get_lobby(state.lobby_id)
-
-    players =
-      battle.players
-      |> Enum.map(&Client.get_client_by_id/1)
-      |> Enum.filter(fn c -> c.player end)
-      |> Enum.map(fn c -> c.userid end)
+    player_ids =
+      list_players(state)
+      |> Enum.map(fn %{userid: player_id} -> player_id end)
 
     # If battle has no players it'll succeed regardless
-    case players do
+    case player_ids do
       [] ->
         true
 
       _ ->
-        players
-        |> User.list_combined_friendslist()
-        |> Enum.member?(userid)
+        friend_ids = Account.list_friend_ids_of_user(userid)
+
+        player_ids
+        |> Enum.map(fn player_id ->
+          Enum.member?(friend_ids, player_id)
+        end)
+        |> Enum.any?()
     end
   end
 
   def is_on_friendlist?(userid, state, :all) do
-    battle = Battle.get_lobby(state.lobby_id)
+    member_ids =
+      Battle.get_lobby(state.lobby_id)
+      |> Map.get(:players, [])
 
-    # If battle has no members it'll succeed regardless
-    case battle do
-      %{players: []} ->
+    # If battle has no players it'll succeed regardless
+    case member_ids do
+      [] ->
         true
 
       _ ->
-        battle
-        |> Map.get(:players)
-        |> User.list_combined_friendslist()
-        |> Enum.member?(userid)
+        friend_ids = Account.list_friend_ids_of_user(userid)
+
+        member_ids
+        |> Enum.map(fn player_id ->
+          Enum.member?(friend_ids, player_id)
+        end)
+        |> Enum.any?()
     end
   end
 
@@ -882,7 +935,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
     if Config.get_site_config_cache("teiserver.Require Chobby login") == true do
       if client != nil do
-        user = User.get_user_by_id(userid)
+        user = CacheUser.get_user_by_id(userid)
 
         case user.hw_hash do
           "" ->
@@ -896,12 +949,26 @@ defmodule Teiserver.Coordinator.ConsulServer do
       end
     end
 
+    # Blocking using relationships
+    member_list = Battle.get_lobby_member_list(state.lobby_id)
+    match_id = Battle.get_lobby_match_id(state.lobby_id)
+
+    block_status = Account.check_block_status(userid, member_list)
+
+    boss_avoid_status =
+      state.host_bosses
+      |> Stream.map(fn boss_id ->
+        Account.does_a_avoid_b?(boss_id, userid)
+      end)
+      |> Enum.any?()
+
     cond do
       client == nil ->
         {false, "No client"}
 
       client.awaiting_warn_ack ->
-        {false, "Awaiting acknowledgement"}
+        {false,
+         "Awaiting acknowledgement of your warning - check chat from @Coordinator and follow instructions there. Pay attention to spelling."}
 
       client.moderator ->
         {true, :override_approve}
@@ -914,8 +981,20 @@ defmodule Teiserver.Coordinator.ConsulServer do
         {false, "Err"}
 
       state.tournament_lobby == true and
-          not User.has_any_role?(userid, ["Caster", "TourneyPlayer", "Tournament player"]) ->
+          not CacheUser.has_any_role?(userid, ["Caster", "TourneyPlayer", "Tournament player"]) ->
         {false, "Tournament game"}
+
+      block_status == :blocking ->
+        Telemetry.log_simple_lobby_event(userid, match_id, "join_refused.blocking")
+        {false, "You are blocking too many players in this lobby"}
+
+      block_status == :blocked ->
+        Telemetry.log_simple_lobby_event(userid, match_id, "join_refused.blocked")
+        {false, "You are blocked by too many players in this lobby"}
+
+      boss_avoid_status == true ->
+        Telemetry.log_simple_lobby_event(userid, match_id, "join_refused.boss_blocked")
+        {false, "You are blocked by the boss of this lobby"}
 
       Enum.member?(state.approved_users, userid) ->
         {true, :override_approve}
@@ -934,7 +1013,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
   def broadcast_update(state, reason \\ nil) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_liveview_lobby_updates:#{state.lobby_id}",
       {:liveview_lobby_update, :consul_server_updated, state.lobby_id, reason}
     )
@@ -964,6 +1043,9 @@ defmodule Teiserver.Coordinator.ConsulServer do
       client == nil ->
         false
 
+      # Enum.member?(@handled_by_lobby, cmd.command) ->
+      #   false
+
       Enum.member?(@always_allow, cmd.command) ->
         true
 
@@ -987,7 +1069,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
             "No listed command of '#{cmd.command}'"
           end
 
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           cmd.senderid,
           msg,
@@ -997,7 +1079,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
         false
 
       Enum.member?(@host_commands, cmd.command) and not is_host ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           cmd.senderid,
           "You are not allowed to use the '#{cmd.command}' command (host only)",
@@ -1007,7 +1089,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
         false
 
       Enum.member?(@boss_commands, cmd.command) and not (is_host or is_boss) ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           cmd.senderid,
           "You are not allowed to use the '#{cmd.command}' command (boss only)",
@@ -1017,7 +1099,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
         false
 
       not Enum.member?(@host_commands ++ @boss_commands, cmd.command) ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           cmd.senderid,
           "No command of name '#{cmd.command}'",
@@ -1073,7 +1155,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
       |> Enum.each(fn user_id ->
         Lobby.force_change_client(state.coordinator_id, user_id, %{player: false})
 
-        User.send_direct_message(
+        CacheUser.send_direct_message(
           state.coordinator_id,
           user_id,
           "You were AFK while waiting for a game and have been moved to spectators."
@@ -1124,7 +1206,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
           # Sometimes people get added and SPADS thinks they need to go, this delay might help
           :timer.sleep(100)
 
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             userid,
             "#{new_client.name} You were at the front of the queue, you are now a player.",
@@ -1133,7 +1215,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
           if Config.get_user_config_cache(userid, "teiserver.Discord notifications") do
             if Config.get_user_config_cache(userid, "teiserver.Notify - Exited the queue") do
-              BridgeServer.send_direct_message(
+              Communication.send_discord_dm(
                 userid,
                 "You have reached the front of the queue and are now a player."
               )
@@ -1153,7 +1235,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
   def queue_size_changed(state) do
     if state.join_queue != state.last_queue_state do
       PubSub.broadcast(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_lobby_updates:#{state.lobby_id}",
         %{
           channel: "teiserver_lobby_updates",
@@ -1208,7 +1290,7 @@ defmodule Teiserver.Coordinator.ConsulServer do
   def get_user(name, state) do
     name = String.downcase(name)
 
-    case User.get_userid(name) do
+    case CacheUser.get_userid(name) do
       nil ->
         # Try partial search of players in lobby
         battle = Lobby.get_lobby(state.lobby_id)
@@ -1232,11 +1314,6 @@ defmodule Teiserver.Coordinator.ConsulServer do
     end
   end
 
-  @spec is_friend?(T.userid(), Map.t()) :: boolean()
-  def is_friend?(_userid, _state) do
-    true
-  end
-
   # @spec say_message(T.userid(), String.t(), Map.t()) :: Map.t()
   # def say_message(senderid, msg, state) do
   #   Lobby.say(senderid, msg, state.lobby_id)
@@ -1256,8 +1333,8 @@ defmodule Teiserver.Coordinator.ConsulServer do
   @spec log_command(Map.t(), Map.t()) :: Map.t()
   def log_command(cmd, state) do
     message = "$ " <> command_as_message(cmd)
-    sender = User.get_user_by_id(cmd.senderid)
-    LobbyChat.persist_message(sender, message, state.lobby_id, :say)
+    sender = CacheUser.get_user_by_id(cmd.senderid)
+    ChatLib.persist_message(sender, message, state.lobby_id, :say)
     state
   end
 
@@ -1316,9 +1393,9 @@ defmodule Teiserver.Coordinator.ConsulServer do
 
       # Toggle with Coordinator.cast_consul(lobby_id, {:put, :unready_can_play, true})
       unready_can_play: false,
-      last_balance_hash: nil,
       last_queue_state: [],
       balance_result: nil,
+      balance_algorithm: "loser_picks",
       player_limit: Config.get_site_config_cache("teiserver.Default player limit"),
       showmatch: true
     }
@@ -1360,9 +1437,8 @@ defmodule Teiserver.Coordinator.ConsulServer do
   def init(opts) do
     lobby_id = opts[:lobby_id]
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby_id}")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby_id}")
     Logger.metadata(request_id: "ConsulServer##{lobby_id}")
 
     # Update the queue pids cache to point to this process

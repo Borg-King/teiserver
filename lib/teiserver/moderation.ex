@@ -1,11 +1,12 @@
 defmodule Teiserver.Moderation do
+  @moduledoc false
   import Ecto.Query, warn: false
-  alias Central.Repo
+  alias Teiserver.Repo
   # require Logger
 
   alias Phoenix.PubSub
   alias Teiserver.Data.Types, as: T
-  alias Central.Helpers.QueryHelpers
+  alias Teiserver.Helper.QueryHelpers
 
   alias Teiserver.{Account}
   import Teiserver.Logging.Helpers, only: [add_audit_log: 4]
@@ -17,6 +18,8 @@ defmodule Teiserver.Moderation do
 
   @spec colour :: atom
   defdelegate colour(), to: ReportLib
+
+  def overwatch_icon(), do: "eye"
 
   @spec report_query(List.t()) :: Ecto.Query.t()
   def report_query(args) do
@@ -30,7 +33,7 @@ defmodule Teiserver.Moderation do
     |> ReportLib.search(args[:search])
     |> ReportLib.preload(args[:preload])
     |> ReportLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -52,12 +55,13 @@ defmodule Teiserver.Moderation do
   @doc """
 
   """
-  @spec list_outstanding_reports(T.userid()) :: List.t()
-  @spec list_outstanding_reports(T.userid(), List.t()) :: List.t()
-  def list_outstanding_reports(userid, args \\ []) do
+  @spec list_outstanding_reports_against_user(T.userid()) :: List.t()
+  @spec list_outstanding_reports_against_user(T.userid(), List.t()) :: List.t()
+  def list_outstanding_reports_against_user(userid, args \\ []) do
     search = [
       target_id: userid,
       no_result: true,
+      closed: false,
       inserted_after: Timex.shift(Timex.now(), days: -ReportLib.get_outstanding_report_max_days())
     ]
 
@@ -141,7 +145,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_create_report({:ok, report}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -177,7 +181,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_update_report({:ok, report}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -222,6 +226,65 @@ defmodule Teiserver.Moderation do
     Report.changeset(report, %{})
   end
 
+  def create_report_group_and_report(report_params) do
+    report_group = get_or_make_report_group(report_params.target_id, report_params.match_id)
+
+    report_params =
+      Map.merge(report_params, %{
+        report_group_id: report_group.id
+      })
+
+    case create_report(report_params) do
+      {:ok, report} ->
+        {:ok, report_group} =
+          Teiserver.Moderation.update_report_group(report_group, %{
+            report_count: report_group.report_count + 1
+          })
+
+        {:ok, report_group, report}
+
+      result ->
+        result
+    end
+  end
+
+  alias Teiserver.Moderation.ReportGroupLib
+
+  @spec list_report_groups() :: [ComplexServerEventType.t()]
+  defdelegate list_report_groups(), to: ReportGroupLib
+
+  @spec list_report_groups(list) :: [ComplexServerEventType.t()]
+  defdelegate list_report_groups(args), to: ReportGroupLib
+
+  @spec get_report_group!(non_neg_integer) :: ComplexServerEventType.t()
+  defdelegate get_report_group!(id), to: ReportGroupLib
+
+  @spec get_report_group!(non_neg_integer, list) :: ComplexServerEventType.t()
+  defdelegate get_report_group!(id, args), to: ReportGroupLib
+
+  @spec create_report_group() :: {:ok, ComplexServerEventType.t()} | {:error, Ecto.Changeset}
+  defdelegate create_report_group(), to: ReportGroupLib
+
+  @spec create_report_group(map) :: {:ok, ComplexServerEventType.t()} | {:error, Ecto.Changeset}
+  defdelegate create_report_group(attrs), to: ReportGroupLib
+
+  @spec update_report_group(ComplexServerEventType.t(), map) ::
+          {:ok, ComplexServerEventType.t()} | {:error, Ecto.Changeset}
+  defdelegate update_report_group(report_group, attrs), to: ReportGroupLib
+
+  @spec delete_report_group(ComplexServerEventType) ::
+          {:ok, ComplexServerEventType} | {:error, Ecto.Changeset}
+  defdelegate delete_report_group(report_group), to: ReportGroupLib
+
+  @spec change_report_group(ComplexServerEventType) :: Ecto.Changeset
+  defdelegate change_report_group(report_group), to: ReportGroupLib
+
+  @spec change_report_group(ComplexServerEventType, map) :: Ecto.Changeset
+  defdelegate change_report_group(report_group, attrs), to: ReportGroupLib
+
+  @spec get_or_make_report_group(T.userid(), T.match_id() | nil) :: ReportGroup.t()
+  defdelegate get_or_make_report_group(target_id, match_id), to: ReportGroupLib
+
   alias Teiserver.Moderation.{Response, ResponseLib}
 
   @spec response_query(List.t()) :: Ecto.Query.t()
@@ -236,7 +299,7 @@ defmodule Teiserver.Moderation do
     |> ResponseLib.search(args[:search])
     |> ResponseLib.preload(args[:preload])
     |> ResponseLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -327,7 +390,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_create_response({:ok, response}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -364,7 +427,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_update_response({:ok, response}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -423,7 +486,7 @@ defmodule Teiserver.Moderation do
     |> ActionLib.search(args[:search])
     |> ActionLib.preload(args[:preload])
     |> ActionLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -473,25 +536,36 @@ defmodule Teiserver.Moderation do
     |> Repo.one!()
   end
 
-  # Uncomment this if needed, default files do not need this function
-  # @doc """
-  # Gets a single action.
+  @doc """
+  Gets a single action.
 
-  # Returns `nil` if the Action does not exist.
+  Returns `nil` if the Action does not exist.
 
-  # ## Examples
+  ## Examples
 
-  #     iex> get_action(123)
-  #     %Action{}
+      iex> get_action(123)
+      %Action{}
 
-  #     iex> get_action(456)
-  #     nil
+      iex> get_action(456)
+      nil
 
-  # """
-  # def get_action(id, args \\ []) when not is_list(id) do
-  #   action_query(id, args)
-  #   |> Repo.one
-  # end
+  """
+  @spec get_action(Integer.t() | List.t()) :: Action.t()
+  @spec get_action(Integer.t(), List.t()) :: Action.t()
+  def get_action(id) when not is_list(id) do
+    action_query(id, [])
+    |> Repo.one()
+  end
+
+  def get_action(args) do
+    action_query(nil, args)
+    |> Repo.one()
+  end
+
+  def get_action(id, args) do
+    action_query(id, args)
+    |> Repo.one()
+  end
 
   @doc """
   Creates a action.
@@ -515,7 +589,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_create_action({:ok, action}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -551,7 +625,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_update_action({:ok, action}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -610,7 +684,7 @@ defmodule Teiserver.Moderation do
     |> ProposalLib.search(args[:search])
     |> ProposalLib.preload(args[:preload])
     |> ProposalLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -702,7 +776,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_create_proposal({:ok, proposal}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -739,7 +813,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_update_proposal({:ok, proposal}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -874,7 +948,7 @@ defmodule Teiserver.Moderation do
     |> BanLib.search(args[:search])
     |> BanLib.preload(args[:preload])
     |> BanLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -924,25 +998,24 @@ defmodule Teiserver.Moderation do
     |> Repo.one!()
   end
 
-  # Uncomment this if needed, default files do not need this function
-  # @doc """
-  # Gets a single ban.
+  @doc """
+  Gets a single ban.
 
-  # Returns `nil` if the Ban does not exist.
+  Returns `nil` if the Ban does not exist.
 
-  # ## Examples
+  ## Examples
 
-  #     iex> get_ban(123)
-  #     %Ban{}
+      iex> get_ban(123)
+      %Ban{}
 
-  #     iex> get_ban(456)
-  #     nil
+      iex> get_ban(456)
+      nil
 
-  # """
-  # def get_ban(id, args \\ []) when not is_list(id) do
-  #   ban_query(id, args)
-  #   |> Repo.one
-  # end
+  """
+  def get_ban(id, args \\ []) when not is_list(id) do
+    ban_query(id, args)
+    |> Repo.one()
+  end
 
   @doc """
   Creates a ban.
@@ -966,7 +1039,7 @@ defmodule Teiserver.Moderation do
 
   def broadcast_create_ban({:ok, ban}) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "global_moderation",
       %{
         channel: "global_moderation",
@@ -1040,7 +1113,7 @@ defmodule Teiserver.Moderation do
   def unbridge_user(nil, _, _, _), do: :no_user
 
   def unbridge_user(user, message, flagged_word_count, location) do
-    if not Teiserver.User.is_restricted?(user, ["Bridging"]) do
+    if not Teiserver.CacheUser.is_restricted?(user, ["Bridging"]) do
       {:ok, _action} =
         create_action(%{
           target_id: user.id,

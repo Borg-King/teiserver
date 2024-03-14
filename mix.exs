@@ -1,9 +1,9 @@
-defmodule Central.MixProject do
+defmodule Teiserver.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :central,
+      app: :teiserver,
       version: "0.1.0",
       elixir: ">= 1.12.2",
       description: description(),
@@ -32,7 +32,7 @@ defmodule Central.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      mod: {Central.Application, []},
+      mod: {Teiserver.Application, []},
       extra_applications: [:logger, :runtime_tools, :os_mon, :iex]
     ]
   end
@@ -51,9 +51,9 @@ defmodule Central.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 3.3"},
       {:phoenix_live_reload, "~> 1.4", only: :dev},
-      {:phoenix_live_view, "~> 0.18"},
+      {:phoenix_live_view, "~> 0.19"},
       {:floki, ">= 0.34.0", only: :test},
-      {:phoenix_live_dashboard, "~> 0.7"},
+      {:phoenix_live_dashboard, "~> 0.8"},
       {:esbuild, "~> 0.5", runtime: Mix.env() == :dev},
       {:bamboo, "~> 2.1"},
       {:bamboo_smtp, "~> 4.0"},
@@ -80,10 +80,10 @@ defmodule Central.MixProject do
       {:con_cache, "~> 1.0"},
       {:phoenix_pubsub, "~> 2.0"},
       {:elixir_uuid, "~> 1.2"},
-      {:excoveralls, "~> 0.15.3", only: :test},
+      {:excoveralls, "~> 0.15.3", only: :test, runtime: false},
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.1", only: [:dev], runtime: false},
-      {:dart_sass, "~> 0.3", only: [:dev]},
+      {:dart_sass, "~> 0.6", only: [:dev]},
       {:libcluster, "~> 3.3"},
       {:tzdata, "~> 1.1"},
       {:ex_ulid, "~> 0.1.0"},
@@ -101,10 +101,10 @@ defmodule Central.MixProject do
       {:json_xema, "~> 0.3"},
 
       # If you want to connect to discord in dev mode, use this
-      # {:nostrum, "~> 0.6", runtime: Mix.env() != :test},
+      # {:nostrum, "~> 0.8", runtime: Mix.env() != :test},
 
       # If you only want to connect to discord in prod, use this
-      {:nostrum, "~> 0.6", runtime: Mix.env() == :prod}
+      {:nostrum, "~> 0.8", runtime: Mix.env() == :prod}
     ]
   end
 

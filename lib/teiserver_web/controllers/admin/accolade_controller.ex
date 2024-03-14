@@ -1,21 +1,20 @@
 defmodule TeiserverWeb.Admin.AccoladeController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
-  alias Teiserver.{User, Account}
+  alias Teiserver.Account
   alias Teiserver.Account.Accolade
   alias Teiserver.Account.AccoladeLib
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Staff.Moderator,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "teiserver_user",
     sub_menu_active: "accolade"
   )
 
-  plug :add_breadcrumb, name: 'Teiserver', url: '/teiserver'
   plug :add_breadcrumb, name: 'Admin', url: '/teiserver/admin'
   plug :add_breadcrumb, name: 'Accolades', url: '/teiserver/admin/accolades'
 
@@ -56,7 +55,7 @@ defmodule TeiserverWeb.Admin.AccoladeController do
         order_by: "Newest first"
       )
 
-    user = User.get_user_by_id(user_id)
+    user = Account.get_user_by_id(user_id)
 
     conn
     |> assign(:accolades, accolades)

@@ -1,7 +1,8 @@
-defmodule Central.Repo.Migrations.ClientEvent do
+defmodule Teiserver.Repo.Migrations.ComplexClientEvent do
   use Ecto.Migration
 
   def change do
+    # User properties
     create table(:teiserver_telemetry_property_types) do
       add :name, :string
     end
@@ -30,11 +31,16 @@ defmodule Central.Repo.Migrations.ClientEvent do
       add :value, :string
     end
 
+    # Client events
+    create table(:telemetry_client_event_types) do
+      add :name, :string
+    end
+
     create table(:teiserver_telemetry_unauth_events) do
       add :hash, :string
       add :timestamp, :utc_datetime
 
-      add :event_type_id, references(:teiserver_telemetry_event_types, on_delete: :nothing)
+      add :event_type_id, references(:telemetry_client_event_types, on_delete: :nothing)
       add :value, :jsonb
     end
 
@@ -42,7 +48,7 @@ defmodule Central.Repo.Migrations.ClientEvent do
       add :user_id, references(:account_users, on_delete: :nothing)
       add :timestamp, :utc_datetime
 
-      add :event_type_id, references(:teiserver_telemetry_event_types, on_delete: :nothing)
+      add :event_type_id, references(:telemetry_client_event_types, on_delete: :nothing)
       add :value, :jsonb
     end
   end

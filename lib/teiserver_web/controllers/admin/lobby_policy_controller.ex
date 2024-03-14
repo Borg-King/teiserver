@@ -1,22 +1,22 @@
 defmodule TeiserverWeb.Admin.LobbyPolicyController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.{Game}
   alias Teiserver.Game.LobbyPolicyLib
-  import Central.Helpers.StringHelper, only: [convert_textarea_to_array: 1]
-  alias Central.Helpers.StylingHelper
+  import Teiserver.Helper.StringHelper, only: [convert_textarea_to_array: 1]
+  alias Teiserver.Helper.StylingHelper
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Game.LobbyPolicy,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
-    site_menu_active: "teiserver_admin",
+    site_menu_active: "admin",
     sub_menu_active: "lobby_policy"
   )
 
-  plug :add_breadcrumb, name: 'Admin', url: '/admin'
+  plug :add_breadcrumb, name: 'Admin', url: '/teiserver/admin'
   plug :add_breadcrumb, name: 'Lobby policies', url: '/admin/lobby_policies'
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()

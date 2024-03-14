@@ -7,11 +7,11 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Show do
   alias Teiserver.Account
   alias Teiserver.Data.Matchmaking
   alias Teiserver.Game.QueueLib
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @extra_menu_content """
   &nbsp;&nbsp;&nbsp;
-    <a href='/teiserver/battle/lobbies' class="btn btn-outline-primary">
+    <a href='/battle/lobbies' class="btn btn-outline-primary">
       <i class="fa-solid fa-fw fa-swords"></i>
       Battles
     </a>
@@ -22,7 +22,6 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Show do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
     extra_content = @extra_menu_content
 
@@ -31,12 +30,12 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Show do
       |> Teiserver.ServerUserPlug.live_call()
       |> add_breadcrumb(name: "Teiserver", url: "/teiserver")
       |> add_breadcrumb(name: "Queues", url: "/teiserver/game/queues")
-      |> assign(:site_menu_active, "teiserver_admin")
+      |> assign(:site_menu_active, "admin")
       |> assign(:view_colour, QueueLib.colours())
       |> assign(:messages, [])
       |> assign(:extra_menu_content, extra_content)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -44,7 +43,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Show do
     # case allow?(socket.assigns[:current_user], "Moderator") do
     #   true ->
     id = int_parse(id)
-    PubSub.subscribe(Central.PubSub, "teiserver_queue:#{id}")
+    PubSub.subscribe(Teiserver.PubSub, "teiserver_queue:#{id}")
     queue = Matchmaking.get_queue(id)
 
     queue_state =
@@ -74,7 +73,7 @@ defmodule TeiserverWeb.Matchmaking.QueueLive.Show do
     #   false ->
     #     {:noreply,
     #      socket
-    #      |> redirect(to: Routes.general_page_path(socket, :index))}
+    #      |> redirect(to: ~p"/")}
     # end
   end
 

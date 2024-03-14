@@ -1,6 +1,6 @@
 defmodule Teiserver.Account.NewSmurfReport do
-  alias Teiserver.{Account, User}
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  alias Teiserver.{Account, CacheUser}
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   require Logger
 
   @spec icon() :: String.t()
@@ -13,20 +13,25 @@ defmodule Teiserver.Account.NewSmurfReport do
   def run(_conn, params) do
     params = apply_defaults(params)
 
-    max_age =
-      params["age"]
+    max_play_age =
+      params["max_play_age"]
       |> int_parse
 
-    # Get new users first
+    max_account_age =
+      params["max_account_age"]
+      |> int_parse
+
+    # Get users who have played recently
     new_users =
       Account.list_users(
         search: [
-          inserted_after: Timex.now() |> Timex.shift(days: -max_age),
+          last_played_after: Timex.now() |> Timex.shift(days: -max_play_age),
+          inserted_after: Timex.now() |> Timex.shift(days: -max_account_age),
           smurf_of: false,
           verified: true
         ],
         limit: 1000,
-        order_by: "Newest first"
+        order_by: "Last played"
       )
 
     # Extract list of ids
@@ -71,7 +76,7 @@ defmodule Teiserver.Account.NewSmurfReport do
         limit: :infinity
       )
       |> Enum.filter(fn %{user_id: userid} ->
-        User.is_verified?(userid)
+        CacheUser.is_verified?(userid)
       end)
 
     # Extract the found values
@@ -101,20 +106,15 @@ defmodule Teiserver.Account.NewSmurfReport do
         {u.id, Account.get_user_stat_data(u.id)}
       end)
 
-    # Now apply filters that require us to have their stats
+    # Now trim them down that little bit more
     relevant_new_users =
       relevant_new_users
-      |> Enum.reject(fn user ->
-        if params["require_games"] == "true" do
-          stats = user_stats[user.id]
+      |> Enum.filter(fn u ->
+        stats = user_stats[u.id]
 
-          total =
-            ~w(recent_count.duel recent_count.ffa recent_count.team)
-            |> Enum.reduce(0, fn key, acc ->
-              Map.get(stats, key, 0) + acc
-            end)
-
-          total == 0
+        cond do
+          (stats["smurf_count"] || 0) > 0 -> false
+          true -> true
         end
       end)
 
@@ -130,9 +130,9 @@ defmodule Teiserver.Account.NewSmurfReport do
   defp apply_defaults(params) do
     Map.merge(
       %{
-        "require_games" => "true",
         "ignore_banned" => "true",
-        "age" => "31"
+        "max_play_age" => "5",
+        "max_account_age" => "90"
       },
       Map.get(params, "report", %{})
     )

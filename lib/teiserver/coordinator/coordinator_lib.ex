@@ -1,6 +1,6 @@
 defmodule Teiserver.Coordinator.CoordinatorLib do
   alias Teiserver.Data.Types, as: T
-  alias Teiserver.User
+  alias Teiserver.CacheUser
 
   @spec help(T.user(), boolean(), String.t()) :: String.t()
   def help(user, host, command) do
@@ -28,7 +28,7 @@ defmodule Teiserver.Coordinator.CoordinatorLib do
       {"password?", [], "Tells you the room password", :everybody},
       {"splitlobby", ["minimum players"],
        "Causes a \"vote\" to start where other players can elect to join you in splitting the lobby, follow someone
-of their choosing or remain in place. After 30 seconds, if at least the minimum number of players agreed to split, you are moved to a new (empty) lobby and those that voted yes
+of their choosing or remain in place. After 60 seconds, if at least the minimum number of players agreed to split, you are moved to a new (empty) lobby and those that voted yes
 or are following someone that voted yes are also moved to that lobby.", :everybody},
       {"roll", ["range"], "Rolls a random number based on the range format.
 - Dice format: nDs, where n is number of dice and s is sides of die. E.g. 4D6 - 4 dice with 6 sides are rolled
@@ -240,8 +240,8 @@ Multiple locks can be engaged at the same time
   defp can_use?(user, host, group) do
     case group do
       :everybody -> true
-      :host -> User.is_moderator?(user) or host
-      :moderator -> User.is_moderator?(user)
+      :host -> CacheUser.is_moderator?(user) or host
+      :moderator -> CacheUser.is_moderator?(user)
       _ -> false
     end
   end

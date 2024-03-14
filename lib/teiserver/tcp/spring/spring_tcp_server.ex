@@ -5,7 +5,7 @@ defmodule Teiserver.SpringTcpServer do
 
   alias Phoenix.PubSub
   alias Teiserver.Config
-  alias Teiserver.{User, Client, Account, Room}
+  alias Teiserver.{CacheUser, Client, Account, Room}
   alias Teiserver.Protocols.{SpringIn, SpringOut}
   alias Teiserver.Data.Types, as: T
 
@@ -17,9 +17,9 @@ defmodule Teiserver.SpringTcpServer do
         ]
   def get_ssl_opts() do
     {certfile, cacertfile, keyfile} = {
-      Application.get_env(:central, Teiserver)[:certs][:certfile],
-      Application.get_env(:central, Teiserver)[:certs][:cacertfile],
-      Application.get_env(:central, Teiserver)[:certs][:keyfile]
+      Application.get_env(:teiserver, Teiserver)[:certs][:certfile],
+      Application.get_env(:teiserver, Teiserver)[:certs][:cacertfile],
+      Application.get_env(:teiserver, Teiserver)[:certs][:keyfile]
     }
 
     [
@@ -48,9 +48,10 @@ defmodule Teiserver.SpringTcpServer do
       :ranch.start_listener(
         make_ref(),
         :ranch_ssl,
-        ssl_opts ++ get_standard_tcp_opts() ++
+        ssl_opts ++
+          get_standard_tcp_opts() ++
           [
-            port: Application.get_env(:central, Teiserver)[:ports][:tls]
+            port: Application.get_env(:teiserver, Teiserver)[:ports][:tls]
           ],
         __MODULE__,
         []
@@ -59,9 +60,10 @@ defmodule Teiserver.SpringTcpServer do
       :ranch.start_listener(
         make_ref(),
         :ranch_tcp,
-        get_standard_tcp_opts() ++ [
-          port: Application.get_env(:central, Teiserver)[:ports][:tcp]
-        ],
+        get_standard_tcp_opts() ++
+          [
+            port: Application.get_env(:teiserver, Teiserver)[:ports][:tcp]
+          ],
         __MODULE__,
         []
       )
@@ -78,7 +80,8 @@ defmodule Teiserver.SpringTcpServer do
   def init(ref, socket, transport) do
     # If we've not started up yet, lets just delay for a moment
     # for some of the stuff to get sorted
-    if Central.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") != true do
+    if Teiserver.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") !=
+         true do
       :timer.sleep(1000)
     end
 
@@ -92,7 +95,7 @@ defmodule Teiserver.SpringTcpServer do
     :ranch.accept_ack(ref)
     transport.setopts(socket, [{:active, true}])
 
-    heartbeat = Application.get_env(:central, Teiserver)[:heartbeat_interval]
+    heartbeat = Application.get_env(:teiserver, Teiserver)[:heartbeat_interval]
 
     if heartbeat do
       :timer.send_interval(heartbeat, self(), :heartbeat)
@@ -101,7 +104,13 @@ defmodule Teiserver.SpringTcpServer do
     :timer.send_interval(60_000, self(), :message_count)
 
     # Set nodelay and delay_send values as the opts above don't always seem to do it
-    :inet.setopts(socket, [{:nodelay, false}, {:delay_send, true}])
+    case socket do
+      {:sslsocket, {:gen_tcp, port, _, _}, _} ->
+        :inet.setopts(port, [{:nodelay, false}, {:delay_send, true}])
+
+      _ ->
+        :inet.setopts(socket, [{:nodelay, false}, {:delay_send, true}])
+    end
 
     state = %{
       # Connection state
@@ -110,9 +119,9 @@ defmodule Teiserver.SpringTcpServer do
       socket: socket,
       transport: transport,
       protocol_in:
-        Application.get_env(:central, Teiserver)[:default_spring_protocol].protocol_in(),
+        Application.get_env(:teiserver, Teiserver)[:default_spring_protocol].protocol_in(),
       protocol_out:
-        Application.get_env(:central, Teiserver)[:default_spring_protocol].protocol_out(),
+        Application.get_env(:teiserver, Teiserver)[:default_spring_protocol].protocol_out(),
       ip: ip,
 
       # Client state
@@ -137,7 +146,7 @@ defmodule Teiserver.SpringTcpServer do
       cmd_timestamps: [],
       status_timestamps: [],
       app_status: nil,
-      optimise_protocol: false,
+      protocol_optimisation: :full,
       pending_messages: [],
 
       # Caching app configs
@@ -151,7 +160,7 @@ defmodule Teiserver.SpringTcpServer do
       client_messages: 0
     }
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_server")
 
     redirect_url = Config.get_site_config_cache("system.Redirect url")
 
@@ -187,6 +196,35 @@ defmodule Teiserver.SpringTcpServer do
   end
 
   def handle_info(:init_timeout, state) do
+    {:noreply, state}
+  end
+
+  # Anybody can have full optimisation
+  def handle_info(:post_auth_check, %{protocol_optimisation: :full} = state) do
+    {:noreply, state}
+  end
+
+  # Only chobby is allowed to have partial optimisation
+  def handle_info(:post_auth_check, %{protocol_optimisation: :partial} = state) do
+    if state.app_status != :accepted do
+      user = Account.get_user_by_id(state.userid)
+
+      if not CacheUser.is_bot?(user) do
+        Logger.error("post_auth_check :partial - user is not accepted: #{user.id}/#{user.name}")
+      end
+    end
+
+    {:noreply, state}
+  end
+
+  # Only bots are allowed to have no optimisation
+  def handle_info(:post_auth_check, %{protocol_optimisation: :none} = state) do
+    user = Account.get_user_by_id(state.userid)
+
+    if not CacheUser.is_bot?(user) do
+      Logger.error("post_auth_check :full - user is not bot: #{user.id}/#{user.name}")
+    end
+
     {:noreply, state}
   end
 
@@ -258,7 +296,7 @@ defmodule Teiserver.SpringTcpServer do
   def handle_info(:heartbeat, state) do
     diff = System.system_time(:second) - state.last_msg
 
-    if diff > Application.get_env(:central, Teiserver)[:heartbeat_timeout] do
+    if diff > Application.get_env(:teiserver, Teiserver)[:heartbeat_timeout] do
       SpringOut.reply(:disconnect, "Heartbeat", nil, state)
 
       if state.username do
@@ -317,6 +355,12 @@ defmodule Teiserver.SpringTcpServer do
     {:noreply, state}
   end
 
+  # Relationship messages
+  def handle_info(%{channel: "account_user_relationships:" <> _id} = msg, state) do
+    SpringOut.reply(:user, msg.event, msg, nil, state)
+    {:noreply, state}
+  end
+
   def handle_info(
         %{
           channel: "teiserver_global_lobby_updates",
@@ -332,7 +376,8 @@ defmodule Teiserver.SpringTcpServer do
       else
         keys = Map.keys(new_values)
 
-        if Enum.member?(keys, :locked) or Enum.member?(keys, :map_name) do
+        if Enum.member?(keys, :locked) or Enum.member?(keys, :map_name) or
+             Enum.member?(keys, :spectator_count) do
           SpringOut.reply(:update_battle, lobby_id, nil, state)
         else
           state
@@ -402,7 +447,7 @@ defmodule Teiserver.SpringTcpServer do
   # We were not able to login right away, instead we had to queue for a bit!
   def handle_info({:login_accepted, userid}, state) do
     user = Account.get_user_by_id(userid)
-    new_state = SpringOut.do_login_accepted(state, user)
+    new_state = SpringOut.do_login_accepted(state, user, state.lobby)
 
     # Do we have a clan?
     if user.clan_id do
@@ -415,7 +460,7 @@ defmodule Teiserver.SpringTcpServer do
     if state.lobby_hash == nil do
       send(self(), :terminate)
     else
-      {:ok, _user} = User.do_login(user, state.ip, state.lobby, state.lobby_hash)
+      {:ok, _user} = CacheUser.do_login(user, state.ip, state.lobby, state.lobby_hash)
     end
 
     {:noreply, new_state}
@@ -559,13 +604,79 @@ defmodule Teiserver.SpringTcpServer do
     {:noreply, new_state}
   end
 
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :joined_lobby} = msg,
+        %{protocol_optimisation: :full} = state
+      ) do
+    new_state =
+      if state.lobby_id != nil and msg.lobby_id == state.lobby_id do
+        user_join_battle(msg.client, msg.lobby_id, msg.script_password, state)
+      else
+        state
+      end
+
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :joined_lobby} = msg,
+        %{protocol_optimisation: :partial} = state
+      ) do
+    new_state = user_join_battle(msg.client, msg.lobby_id, msg.script_password, state)
+    {:noreply, new_state}
+  end
+
   def handle_info(%{channel: "teiserver_global_user_updates", event: :joined_lobby} = msg, state) do
     new_state = user_join_battle(msg.client, msg.lobby_id, msg.script_password, state)
     {:noreply, new_state}
   end
 
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :left_lobby} = msg,
+        %{protocol_optimisation: :full} = state
+      ) do
+    new_state =
+      if state.lobby_id != nil and msg.lobby_id == state.lobby_id do
+        user_leave_battle(msg.client, msg.lobby_id, state)
+      else
+        state
+      end
+
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :left_lobby} = msg,
+        %{protocol_optimisation: :partial} = state
+      ) do
+    new_state = user_leave_battle(msg.client, msg.lobby_id, state)
+    {:noreply, new_state}
+  end
+
   def handle_info(%{channel: "teiserver_global_user_updates", event: :left_lobby} = msg, state) do
     new_state = user_leave_battle(msg.client, msg.lobby_id, state)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :kicked_from_lobby} = msg,
+        %{protocol_optimisation: :full} = state
+      ) do
+    new_state =
+      if state.lobby_id != nil and msg.lobby_id == state.lobby_id do
+        user_kicked_from_battle(msg.client, msg.lobby_id, state)
+      else
+        state
+      end
+
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        %{channel: "teiserver_global_user_updates", event: :kicked_from_lobby} = msg,
+        %{protocol_optimisation: :partial} = state
+      ) do
+    new_state = user_kicked_from_battle(msg.client, msg.lobby_id, state)
     {:noreply, new_state}
   end
 
@@ -669,34 +780,47 @@ defmodule Teiserver.SpringTcpServer do
   end
 
   defp user_logged_out(userid, username, state) do
-    known_users =
+    {known_users, room_member_cache} =
       case state.known_users[userid] do
         nil ->
-          state.known_users
+          {state.known_users, state.room_member_cache}
 
         _ ->
+          # Remove from rooms
+          new_room_member_cache =
+            state.room_member_cache
+            |> Map.new(fn {room_name, members} ->
+              if Enum.member?(members, userid) do
+                SpringOut.reply(:remove_user_from_room, {userid, room_name}, nil, state)
+                new_members = List.delete(members, userid)
+                {room_name, new_members}
+              else
+                {room_name, members}
+              end
+            end)
+
           SpringOut.reply(:user_logged_out, {userid, username}, nil, state)
-          Map.delete(state.known_users, userid)
+          {Map.delete(state.known_users, userid), new_room_member_cache}
       end
 
-    %{state | known_users: known_users}
+    %{state | known_users: known_users, room_member_cache: room_member_cache}
   end
 
   defp user_updated(fields, state) do
-    new_user = User.get_user_by_id(state.userid)
+    new_user = CacheUser.get_user_by_id(state.userid)
     new_state = %{state | user: new_user}
 
     fields
     |> Enum.each(fn field ->
       case field do
         :friends ->
-          SpringOut.reply(:friendlist, new_user, nil, state)
+          SpringOut.reply(:friendlist, state.userid, nil, state)
 
         :friend_requests ->
-          SpringOut.reply(:friendlist_request, new_user, nil, state)
+          SpringOut.reply(:friendlist_request, state.userid, nil, state)
 
         :ignored ->
-          SpringOut.reply(:ignorelist, new_user, nil, state)
+          SpringOut.reply(:ignorelist, state.userid, nil, state)
 
         _ ->
           Logger.error("No handler in tcp_server:user_updated with field #{field}")
@@ -707,19 +831,24 @@ defmodule Teiserver.SpringTcpServer do
   end
 
   # Client updates
-  defp client_status_update(new_client, %{optimise_protocol: true} = state) do
-    send_status = [
-      (state.lobby_id != nil and new_client.lobby_id == state.lobby_id),
-      new_client.bot == true,
-      new_client.moderator == true,
-    ]
-    |> Enum.any?
+  defp client_status_update(new_client, %{protocol_optimisation: :full} = state) do
+    send_status =
+      [
+        state.lobby_id != nil and new_client.lobby_id == state.lobby_id,
+        new_client.bot == true,
+        new_client.moderator == true
+      ]
+      |> Enum.any?()
 
     if send_status do
       do_client_status_update(new_client, state)
     else
       state
     end
+  end
+
+  defp client_status_update(new_client, %{protocol_optimisation: :partial} = state) do
+    do_client_status_update(new_client, state)
   end
 
   defp client_status_update(new_client, state) do
@@ -737,12 +866,16 @@ defmodule Teiserver.SpringTcpServer do
     end
   end
 
-  defp client_battlestatus_update(new_client, state) do
+  defp client_battlestatus_update(%{lobby_id: _} = new_client, state) do
     if state.lobby_id != nil and state.lobby_id == new_client.lobby_id do
       SpringOut.reply(:client_battlestatus, new_client, nil, state)
     else
       state
     end
+  end
+
+  defp client_battlestatus_update(_, state) do
+    state
   end
 
   # Battle updates
@@ -862,11 +995,8 @@ defmodule Teiserver.SpringTcpServer do
   end
 
   defp user_join_battle(%{userid: userid} = client, lobby_id, script_password, state) do
-    state = if state.optimise_protocol do
-      do_client_status_update(client, state)
-    else
-      state
-    end
+    # If someone joins the battle, update their status for ourselves
+    state = do_client_status_update(client, state)
 
     script_password =
       cond do
@@ -946,7 +1076,8 @@ defmodule Teiserver.SpringTcpServer do
     userid = client.userid
 
     if userid == state.userid do
-      Phoenix.PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+      PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+      PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby_id}")
     end
 
     # Do they know about the battle?
@@ -1009,46 +1140,56 @@ defmodule Teiserver.SpringTcpServer do
 
   # Chat
   defp new_chat_message(type, from, room_name, msg, state) do
-    case Client.get_client_by_id(from) do
-      nil ->
-        # No client? Ignore them
-        state
+    # This allows us to see messages sent by web-users
+    client =
+      case Client.get_client_by_id(from) do
+        nil ->
+          user = Account.get_user_by_id(from)
 
-      client ->
-        # Do they know about the user?
-        state =
-          case Map.has_key?(state.known_users, from) do
-            false ->
-              SpringOut.reply(:user_logged_in, client, nil, state)
-              %{state | known_users: Map.put(state.known_users, from, _blank_user(from))}
+          Client.create(%{
+            userid: user.id,
+            name: user.name,
+            rank: 0,
+            moderator: CacheUser.is_moderator?(user),
+            bot: CacheUser.is_bot?(user)
+          })
 
-            true ->
-              state
-          end
+        c ->
+          c
+      end
 
-        case type do
-          :direct_message ->
-            SpringOut.reply(:direct_message, {from, msg, state.user}, nil, state)
+    # Do they know about the user?
+    state =
+      case Map.has_key?(state.known_users, from) do
+        false ->
+          SpringOut.reply(:user_logged_in, client, nil, state)
+          %{state | known_users: Map.put(state.known_users, from, _blank_user(from))}
 
-          :chat_message ->
-            SpringOut.reply(
-              :chat_message,
-              {from, room_name, msg, state.user},
-              nil,
-              state
-            )
+        true ->
+          state
+      end
 
-          :chat_message_ex ->
-            SpringOut.reply(
-              :chat_message_ex,
-              {from, room_name, msg, state.user},
-              nil,
-              state
-            )
-        end
+    # Now handle the message itself
+    case type do
+      :direct_message ->
+        SpringOut.reply(:direct_message, {from, msg, state.user}, nil, state)
+
+      :chat_message ->
+        SpringOut.reply(
+          :chat_message,
+          {from, room_name, msg, state.user},
+          nil,
+          state
+        )
+
+      :chat_message_ex ->
+        SpringOut.reply(
+          :chat_message_ex,
+          {from, room_name, msg, state.user},
+          nil,
+          state
+        )
     end
-
-    state
   end
 
   defp user_join_chat_room(userid, room_name, state) do
@@ -1148,14 +1289,10 @@ defmodule Teiserver.SpringTcpServer do
   @spec engage_flood_protection(map()) :: {:stop, String.t(), map()}
   defp engage_flood_protection(state) do
     SpringOut.reply(:disconnect, "Flood protection", nil, state)
-    User.set_flood_level(state.userid, 10)
+    CacheUser.set_flood_level(state.userid, 10)
     Client.disconnect(state.userid, "SpringTCPServer.flood_protection")
 
-    Logger.info(
-      "Spring command overflow from #{state.username}/#{state.userid} with #{Enum.count(state.cmd_timestamps)} commands. Disconnected and flood protection engaged."
-    )
-
-    {:stop, "Flood protection", state}
+    {:stop, :normal, %{state | userid: nil}}
   end
 
   # @spec introduce_user(T.client() | T.userid() | nil, map()) :: map()

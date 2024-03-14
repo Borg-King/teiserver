@@ -4,17 +4,18 @@ defmodule Teiserver.Battle.Tasks.PostMatchProcessTask do
   """
   use Oban.Worker, queue: :teiserver
 
-  alias Teiserver.{Account, Battle, User, Coordinator}
+  alias Teiserver.{Account, Battle, Coordinator}
   alias Teiserver.Battle.MatchMembershipLib
-  alias Central.Helpers.NumberHelper
+  alias Teiserver.Helper.NumberHelper
   alias Teiserver.Config
-  alias Central.Repo
+  alias Teiserver.Repo
   # alias Teiserver.Data.Types, as: T
 
   @impl Oban.Worker
   @spec perform(any) :: :ok
   def perform(_) do
-    if Central.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") == true do
+    if Teiserver.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") ==
+         true do
       if Config.get_site_config_cache("system.Process matches") do
         Battle.list_matches(
           search: [
@@ -83,7 +84,7 @@ defmodule Teiserver.Battle.Tasks.PostMatchProcessTask do
     # Tell the host to re-rate some players
     usernames =
       match.members
-      |> Enum.map_join(" ", fn m -> User.get_username(m.user_id) end)
+      |> Enum.map_join(" ", fn m -> Account.get_username(m.user_id) end)
 
     msg = "updateSkill #{usernames}"
     Coordinator.send_to_user(match.founder_id, msg)
@@ -100,7 +101,7 @@ defmodule Teiserver.Battle.Tasks.PostMatchProcessTask do
     winning_team =
       memberships
       |> Enum.map(fn m ->
-        username = User.get_username(m.user_id)
+        username = Account.get_username(m.user_id)
         win = Map.get(win_map, username, false)
 
         stats =

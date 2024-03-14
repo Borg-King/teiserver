@@ -3,11 +3,12 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   The server used to monitor the autohosts and get data from them
   """
   use GenServer
-  alias Teiserver.{Account, Room, Client, User, Battle, Telemetry}
-  alias Teiserver.Battle.LobbyChat
+  alias Teiserver.{Account, Room, Client, CacheUser, Battle, Telemetry}
+  alias Teiserver.Lobby.ChatLib
   alias Phoenix.PubSub
   alias Teiserver.Account.CalculateSmurfKeyTask
   require Logger
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @spec do_start() :: :ok
   def do_start() do
@@ -28,7 +29,7 @@ defmodule Teiserver.Battle.MatchMonitorServer do
 
   @spec get_match_monitor_userid() :: T.userid()
   def get_match_monitor_userid() do
-    Central.cache_get(:application_metadata_cache, "teiserver_match_monitor_userid")
+    Teiserver.cache_get(:application_metadata_cache, "teiserver_match_monitor_userid")
   end
 
   @impl true
@@ -49,7 +50,7 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   @impl true
   def handle_info(:begin, _state) do
     state =
-      if Central.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") !=
+      if Teiserver.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") !=
            true do
         pid = self()
 
@@ -81,24 +82,22 @@ defmodule Teiserver.Battle.MatchMonitorServer do
     client = Client.get_client_by_id(from_id)
     Battle.stop_match(client.lobby_id)
 
-    Telemetry.log_server_event(nil, "lobby.match_stopped", %{})
+    match_id = Battle.get_match_id_from_userid(from_id)
+    Telemetry.log_simple_lobby_event(nil, match_id, "lobby.match_stopped")
 
     {:noreply, state}
   end
 
   # Battle manually stopped
   def handle_info(
-        {:new_message, _from_id, "autohosts", "* Stopping server (by " <> username},
+        {:new_message, from_id, "autohosts", "* Stopping server (by " <> username},
         state
       ) do
     username = String.replace(username, ")", "")
-    user = Account.get_user_by_name(username)
+    userid = Account.get_userid_from_name(username)
+    match_id = Battle.get_match_id_from_userid(from_id)
 
-    if user do
-      Telemetry.log_server_event(nil, "lobby.manual_stop", %{stopper: user.id})
-    else
-      Telemetry.log_server_event(nil, "lobby.manual_stop", %{stopper: nil})
-    end
+    Telemetry.log_simple_lobby_event(userid, match_id, "lobby.manual_stop")
 
     {:noreply, state}
   end
@@ -122,11 +121,12 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   end
 
   def handle_info({:direct_message, from_id, "broken_connection " <> username}, state) do
-    if User.is_bot?(from_id) or User.is_moderator?(from_id) do
+    if CacheUser.is_bot?(from_id) or CacheUser.is_moderator?(from_id) do
       user = Account.get_user_by_name(username)
 
       if user do
-        Telemetry.log_server_event(user.id, "spads.broken_connection", %{from_id: from_id})
+        Telemetry.log_complex_server_event(user.id, "spads.broken_connection", %{from_id: from_id})
+
         Client.disconnect(user.id, "reported broken connection")
       end
     end
@@ -139,15 +139,63 @@ defmodule Teiserver.Battle.MatchMonitorServer do
     {:noreply, state}
   end
 
-  def handle_info({:direct_message, _from_id, "match-event-" <> data}, state) do
-    # [event | parts] = String.split(data, " ")
-    # [_, frame, _ud, unit_team, attacker_team, unit_def_id] = String.split(parts, ":")
+  # Examples of accepted format:
+  # match-event <playerName> <eventType> <gameTime>
+  # match-event <Beherith> <commands:FirstLineMove> <67>
+  def handle_info({:direct_message, from_id, "match-event " <> data}, state) do
+    case Regex.run(~r/<(.*?)> <(.*?)> <(.*?)>$/, String.trim(data)) do
+      [_all, username, event_type_name, game_time] ->
+        userid = Account.get_userid_from_name(username)
 
-    # l0gfl:16262:ud:0:0:1041
+        if userid && CacheUser.is_bot?(userid) do
+          match_id = Battle.get_match_id_from_userid(from_id)
 
-    Logger.warn("match_event - #{data}")
+          if match_id do
+            game_time = int_parse(game_time)
+            Telemetry.log_simple_match_event(userid, match_id, event_type_name, game_time)
+          end
+        end
 
-    # Create match-event here
+      _ ->
+        Logger.error("match_event bad_match error on '#{data}'")
+    end
+
+    {:noreply, state}
+  end
+
+  # Examples of accepted format:
+  # complex-match-event <playerName> <eventType> <gameTime> <base64data>
+  # complex-match-event <Beherith> <commands:FirstLineMove> <67> <eyJrZXkiOiJ2YWx1ZSJ9>
+  def handle_info({:direct_message, from_id, "complex-match-event " <> data}, state) do
+    case Regex.run(~r/<(.*?)> <(.*?)> <(.*?)> <(.*?)>$/, String.trim(data)) do
+      [_all, username, event_type_name, game_time, base64data] ->
+        case base64_and_json(base64data) do
+          {:ok, json_data} ->
+            userid = Account.get_userid_from_name(username)
+
+            if userid && CacheUser.is_bot?(userid) do
+              match_id = Battle.get_match_id_from_userid(from_id)
+
+              if match_id do
+                game_time = int_parse(game_time)
+
+                Telemetry.log_complex_match_event(
+                  userid,
+                  match_id,
+                  event_type_name,
+                  game_time,
+                  json_data
+                )
+              end
+            end
+
+          {:error, error_message} ->
+            Logger.error("complex_match_event bad_decode error '#{error_message}' on '#{data}'")
+        end
+
+      _ ->
+        Logger.error("complex_match_event bad_match error on '#{data}'")
+    end
 
     {:noreply, state}
   end
@@ -161,28 +209,28 @@ defmodule Teiserver.Battle.MatchMonitorServer do
     case Regex.run(~r/<(.*?)> (d|dallies|dspectators): (.+)$/, data) do
       [_all, username, to, msg] ->
         host = Client.get_client_by_id(from_id)
-        user = User.get_user_by_name(username)
+        user = CacheUser.get_user_by_name(username)
 
         case to do
           "d" ->
             # We don't persist this as it's already persisted elsewhere
-            # LobbyChat.persist_message(user, "g: #{msg}", host.lobby_id, :say)
+            # ChatLib.persist_message(user, "g: #{msg}", host.lobby_id, :say)
             :ok
 
           "dallies" ->
-            LobbyChat.persist_message(user, "a: #{msg}", host.lobby_id, :say)
+            ChatLib.persist_message(user, "a: #{msg}", host.lobby_id, :say)
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "teiserver_liveview_lobby_chat:#{host.lobby_id}",
               {:liveview_lobby_chat, :say, user.id, "a: #{msg}"}
             )
 
           "dspectators" ->
-            LobbyChat.persist_message(user, "s: #{msg}", host.lobby_id, :say)
+            ChatLib.persist_message(user, "s: #{msg}", host.lobby_id, :say)
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "teiserver_liveview_lobby_chat:#{host.lobby_id}",
               {:liveview_lobby_chat, :say, user.id, "s: #{msg}"}
             )
@@ -199,31 +247,39 @@ defmodule Teiserver.Battle.MatchMonitorServer do
     case Regex.run(~r/<(.*?)>:<(.*?)> (d|dallies|dspectators): (.+)$/, data) do
       [_all, username, _user_num, to, msg] ->
         host = Client.get_client_by_id(from_id)
-        user = User.get_user_by_name(username)
+        user = CacheUser.get_user_by_name(username)
+        if host == nil do
+          Logger.error("No host found for from_id: #{from_id} for message #{to}:#{msg}")
+          # Optionally, handle the case here, such as by sending a message back to the user or taking other corrective actions.
+          # Just returning {:noreply, state} for now.
+          {:noreply, state}
+        else
 
-        case to do
-          "d" ->
-            # We don't persist this as it's already persisted elsewhere
-            # LobbyChat.persist_message(user, "g: #{msg}", host.lobby_id, :say)
-            :ok
+          case to do
+            "d" ->
+              # We don't persist this as it's already persisted elsewhere
+              # ChatLib.persist_message(user, "g: #{msg}", host.lobby_id, :say)
+              :ok
 
-          "dallies" ->
-            LobbyChat.persist_message(user, "a: #{msg}", host.lobby_id, :say)
+            "dallies" ->
+              ChatLib.persist_message(user, "a: #{msg}", host.lobby_id, :say)
 
-            PubSub.broadcast(
-              Central.PubSub,
-              "teiserver_liveview_lobby_chat:#{host.lobby_id}",
-              {:liveview_lobby_chat, :say, user.id, "a: #{msg}"}
-            )
+              PubSub.broadcast(
+                Teiserver.PubSub,
+                "teiserver_liveview_lobby_chat:#{host.lobby_id}",
+                {:liveview_lobby_chat, :say, user.id, "a: #{msg}"}
+              )
 
-          "dspectators" ->
-            LobbyChat.persist_message(user, "s: #{msg}", host.lobby_id, :say)
+            "dspectators" ->
+              ChatLib.persist_message(user, "s: #{msg}", host.lobby_id, :say)
 
-            PubSub.broadcast(
-              Central.PubSub,
-              "teiserver_liveview_lobby_chat:#{host.lobby_id}",
-              {:liveview_lobby_chat, :say, user.id, "s: #{msg}"}
-            )
+              PubSub.broadcast(
+                Teiserver.PubSub,
+                "teiserver_liveview_lobby_chat:#{host.lobby_id}",
+                {:liveview_lobby_chat, :say, user.id, "s: #{msg}"}
+              )
+          end
+          {:noreply, state}
         end
 
       _ ->
@@ -274,14 +330,14 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   end
 
   defp handle_json_msg(%{"username" => username, "GPU" => _} = contents, from_id) do
-    case User.get_user_by_name(username) do
+    case CacheUser.get_user_by_name(username) do
       nil ->
         Logger.warn("No username on handle_json_msg: #{username} - #{Kernel.inspect(contents)}")
 
         :ok
 
       user ->
-        if User.is_bot?(from_id) do
+        if CacheUser.is_bot?(from_id) do
           stats = %{
             "hardware:cpuinfo" => contents["CPU"] || "Null CPU",
             "hardware:gpuinfo" => contents["GPU"] || "Null GPU",
@@ -313,8 +369,8 @@ defmodule Teiserver.Battle.MatchMonitorServer do
   defp do_begin() do
     Logger.debug("Starting up Match monitor server")
     account = get_match_monitor_account()
-    Central.cache_put(:application_metadata_cache, "teiserver_match_monitor_userid", account.id)
-    {:ok, user, client} = User.internal_client_login(account.id)
+    Teiserver.cache_put(:application_metadata_cache, "teiserver_match_monitor_userid", account.id)
+    {:ok, user, client} = CacheUser.internal_client_login(account.id)
 
     rooms = ["autohosts"]
 
@@ -332,15 +388,15 @@ defmodule Teiserver.Battle.MatchMonitorServer do
     |> Enum.each(fn room_name ->
       Room.get_or_make_room(room_name, user.id)
       Room.add_user_to_room(user.id, room_name)
-      :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
     end)
 
-    :ok = PubSub.subscribe(Central.PubSub, "legacy_user_updates:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "legacy_user_updates:#{user.id}")
 
     state
   end
 
-  @spec get_match_monitor_account() :: Central.Account.User.t()
+  @spec get_match_monitor_account() :: Teiserver.Account.CacheUser.t()
   def get_match_monitor_account() do
     user =
       Account.get_user(nil,
@@ -359,19 +415,19 @@ defmodule Teiserver.Battle.MatchMonitorServer do
             icon: "fa-solid fa-camera-cctv",
             colour: "#00AA66",
             password: Account.make_bot_password(),
+            roles: ["Verified", "Bot"],
             data: %{
               bot: true,
               moderator: false,
-              lobby_client: "Teiserver Internal Process",
-              roles: ["Verified", "Bot"]
+              lobby_client: "Teiserver Internal Process"
             }
           })
 
         Account.update_user_stat(account.id, %{
-          country_override: Application.get_env(:central, Teiserver)[:server_flag]
+          country_override: Application.get_env(:teiserver, Teiserver)[:server_flag]
         })
 
-        User.recache_user(account.id)
+        CacheUser.recache_user(account.id)
         account
 
       account ->
@@ -402,6 +458,22 @@ defmodule Teiserver.Battle.MatchMonitorServer do
 
       _ ->
         nil
+    end
+  end
+
+  defp base64_and_json(raw_string) do
+    case Base.url_decode64(raw_string) do
+      {:ok, json_str} ->
+        case Jason.decode(json_str) do
+          {:ok, contents} ->
+            {:ok, contents}
+
+          {:error, _} ->
+            {:error, "json decode error"}
+        end
+
+      _ ->
+        {:error, "base64 decode error"}
     end
   end
 end

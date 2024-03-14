@@ -1,5 +1,5 @@
 defmodule Teiserver.SpringTokenTest do
-  use Central.ServerCase, async: false
+  use Teiserver.ServerCase, async: false
   require Logger
   alias Central.Helpers.GeneralTestLib
   alias Teiserver.Client
@@ -39,7 +39,7 @@ defmodule Teiserver.SpringTokenTest do
         }
       })
 
-    Teiserver.Account.UserCache.recache_user(user.id)
+    Teiserver.Account.UserCacheLib.recache_user(user.id)
 
     %{socket: socket} = spring_tls_setup()
     _welcome = _recv_raw(socket)
@@ -67,8 +67,8 @@ defmodule Teiserver.SpringTokenTest do
 
     # Token 1 and 2 will almost certainly be different, instead we
     # check to ensure they pull back the same user
-    {:ok, user1, _claims} = Central.Account.Guardian.resource_from_token(token)
-    {:ok, user2, _claims} = Central.Account.Guardian.resource_from_token(token)
+    {:ok, user1, _claims} = Teiserver.Account.Guardian.resource_from_token(token)
+    {:ok, user2, _claims} = Teiserver.Account.Guardian.resource_from_token(token)
 
     assert user1.id == user.id
     assert user2.id == user.id

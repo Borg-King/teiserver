@@ -1,4 +1,4 @@
-defmodule Central.Repo.Migrations.Queues do
+defmodule Teiserver.Repo.Migrations.Queues do
   use Ecto.Migration
 
   def change do
@@ -12,6 +12,8 @@ defmodule Central.Repo.Migrations.Queues do
       add :conditions, :jsonb
       add :settings, :jsonb
       add :map_list, {:array, :string}
+
+      add :team_count, :integer
 
       timestamps()
     end

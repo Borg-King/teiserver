@@ -1,10 +1,7 @@
 defmodule Teiserver.Logging.Helpers do
   @moduledoc false
-  alias Central.Repo
   use Timex
-
   alias Teiserver.Logging
-  alias Teiserver.Logging.ErrorLog
 
   @spec add_anonymous_audit_log(String.t(), Map.t()) :: Teiserver.Logging.AuditLog.t()
   def add_anonymous_audit_log(action, details) do
@@ -35,7 +32,21 @@ defmodule Teiserver.Logging.Helpers do
     the_log
   end
 
-  @spec add_audit_log(Plug.Conn.t(), String.t(), Map.t()) :: Teiserver.Logging.AuditLog.t()
+  @spec add_audit_log(Plug.Conn.t() | Phoenix.LiveView.Socket.t(), String.t(), Map.t()) ::
+          Teiserver.Logging.AuditLog.t()
+  def add_audit_log(%Phoenix.LiveView.Socket{} = socket, action, details) do
+    {:ok, the_log} =
+      Logging.create_audit_log(%{
+        action: action,
+        user_id:
+          if(socket.assigns[:current_user], do: socket.assigns[:current_user].id, else: nil),
+        details: details,
+        ip: "."
+      })
+
+    the_log
+  end
+
   def add_audit_log(conn, action, details) do
     {:ok, the_log} =
       Logging.create_audit_log(%{
@@ -48,14 +59,13 @@ defmodule Teiserver.Logging.Helpers do
     the_log
   end
 
-  @spec add_audit_log(non_neg_integer(), String.t(), String.t(), Map.t()) ::
+  @spec add_audit_log(nil | non_neg_integer(), nil | String.t(), String.t(), Map.t()) ::
           Teiserver.Logging.AuditLog.t()
   def add_audit_log(userid, ip, action, details) when is_integer(userid) do
     {:ok, the_log} =
       Logging.create_audit_log(%{
         action: action,
         user_id: userid,
-        group_id: nil,
         details: details,
         ip: ip
       })
@@ -63,41 +73,14 @@ defmodule Teiserver.Logging.Helpers do
     the_log
   end
 
-  def add_error_log(error) do
-    conn = error.conn
+  def add_audit_log(nil, ip, action, details) do
+    {:ok, the_log} =
+      Logging.create_audit_log(%{
+        action: action,
+        details: details,
+        ip: ip
+      })
 
-    user_id = (conn.assigns[:current_user] || %{id: nil}).id
-
-    traceback =
-      try do
-        error.stack
-        |> Enum.map_join("\n", fn {module, function, arity, kwlist} ->
-          "#{kwlist[:file]}:#{kwlist[:line]}: #{module}.#{function}/#{arity}"
-        end)
-      catch
-        :error, _e ->
-          "Error converting traceback #{error.stack |> Kernel.inspect() |> String.slice(0, 4096)}"
-      end
-
-    params =
-      conn.params
-      |> Enum.map(fn {k, v} ->
-        {k, v |> Kernel.inspect() |> String.slice(0, 4096)}
-      end)
-      |> Map.new()
-
-    ErrorLog.changeset(%ErrorLog{}, %{
-      path: conn.request_path,
-      method: conn.method,
-      reason: error.reason |> Kernel.inspect() |> String.replace("\\n", "\n"),
-      traceback: traceback,
-      hidden: false,
-      data: %{
-        "params" => params
-        # "cache" => conn.assigns.cache
-      },
-      user_id: user_id
-    })
-    |> Repo.insert!()
+    the_log
   end
 end

@@ -9,18 +9,16 @@ defmodule TeiserverWeb.AdminDashLive.LoginThrottle do
 
   @impl true
   def mount(_params, session, socket) do
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_liveview_login_throttle")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_liveview_login_throttle")
 
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
       |> add_breadcrumb(name: "Admin", url: ~p"/teiserver/admin")
       |> add_breadcrumb(name: "Dashboard", url: ~p"/admin/dashboard")
       |> add_breadcrumb(name: "Login throttle", url: ~p"/admin/dashboard/login_throttle")
-      |> assign(:site_menu_active, "teiserver_admin")
-      |> assign(:view_colour, Central.Admin.AdminLib.colours())
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
+      |> assign(:site_menu_active, "admin")
+      |> assign(:view_colour, Teiserver.Admin.AdminLib.colours())
       |> assign(:heartbeats, %{})
       |> assign(:queues, nil)
       |> assign(:recent_logins, [])
@@ -30,7 +28,7 @@ defmodule TeiserverWeb.AdminDashLive.LoginThrottle do
 
     :timer.send_interval(5_000, :tick)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -42,7 +40,7 @@ defmodule TeiserverWeb.AdminDashLive.LoginThrottle do
       false ->
         {:noreply,
          socket
-         |> redirect(to: Routes.general_page_path(socket, :index))}
+         |> redirect(to: ~p"/")}
     end
   end
 

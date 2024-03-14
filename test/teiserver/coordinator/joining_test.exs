@@ -1,10 +1,10 @@
 defmodule Teiserver.Coordinator.JoiningTest do
-  use Central.ServerCase, async: false
+  use Teiserver.ServerCase, async: false
   alias Teiserver.Common.PubsubListener
   alias Teiserver.Account.ClientLib
   alias Teiserver.Coordinator
 
-  alias Teiserver.Account.UserCache
+  alias Teiserver.Account.UserCacheLib
 
   import Teiserver.TeiserverTestLib,
     only: [tachyon_auth_setup: 0, _tachyon_send: 2, _tachyon_recv: 1]
@@ -14,7 +14,7 @@ defmodule Teiserver.Coordinator.JoiningTest do
     %{socket: socket, user: user} = tachyon_auth_setup()
 
     # User needs to be a moderator (at this time) to start/stop Coordinator mode
-    UserCache.update_user(%{user | moderator: true})
+    UserCacheLib.update_user(%{user | moderator: true})
     ClientLib.refresh_client(user.id)
 
     battle_data = %{

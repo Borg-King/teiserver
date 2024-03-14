@@ -13,9 +13,9 @@
   },
   value: @page_view_log.user.name,
   link: %{
-    path: Routes.admin_user_path(@conn, :show, @page_view_log.user_id),
-    bsname: elem(Central.Account.UserLib.colours() |> colours(), 2),
-    icon: Central.Account.UserLib.icon()
+    path: ~p"/teiserver/admin/user/#{@page_view_log.user_id}",
+    bsname: elem(Teiserver.Account.UserLib.colours() |> colours(), 2),
+    icon: Teiserver.Account.UserLib.icon()
   }
 ) %>
 
@@ -31,7 +31,12 @@
 
 <%= central_component("detail_line",
   label: "Full route",
-  value: "#{@page_view_log.section}/#{@page_view_log.path}"
+  value: "#{@page_view_log.section}/#{@page_view_log.path}",
+  link: %{
+    path: "/#{@page_view_log.section}/#{@page_view_log.path}",
+    bsname: "primary",
+    icon: Teiserver.Logging.PageViewLogLib.icon()
+  }
 ) %>
 
 <hr />

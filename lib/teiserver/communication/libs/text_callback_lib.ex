@@ -1,6 +1,6 @@
 defmodule Teiserver.Communication.TextCallbackLib do
   @moduledoc false
-  use CentralWeb, :library
+  use TeiserverWeb, :library
   alias Teiserver.{Communication}
   alias Teiserver.Communication.{TextCallback}
 
@@ -108,11 +108,11 @@ defmodule Teiserver.Communication.TextCallbackLib do
   def build_text_callback_cache do
     Communication.list_text_callbacks(limit: :infinity)
     |> Enum.each(fn text_callback ->
-      Central.store_put(:text_callback_store, text_callback.id, text_callback)
+      Teiserver.store_put(:text_callback_store, text_callback.id, text_callback)
 
       text_callback.triggers
       |> Enum.each(fn trigger_text ->
-        Central.store_put(:text_callback_trigger_lookup, trigger_text, text_callback.id)
+        Teiserver.store_put(:text_callback_trigger_lookup, trigger_text, text_callback.id)
       end)
     end)
   end
@@ -120,11 +120,12 @@ defmodule Teiserver.Communication.TextCallbackLib do
   @spec update_text_callback_cache({:ok, TextCallback.t()} | {:error, Ecto.Changeset.t()}) ::
           {:ok, TextCallback.t()} | {:error, Ecto.Changeset.t()}
   def update_text_callback_cache({:ok, text_callback} = args) do
-    Central.store_put(:text_callback_store, text_callback.id, text_callback)
+    Teiserver.store_put(:text_callback_store, text_callback.id, text_callback)
+    Teiserver.Bridge.CommandLib.re_cache_discord_command("textcb")
 
     text_callback.triggers
     |> Enum.each(fn trigger_text ->
-      Central.store_put(:text_callback_trigger_lookup, trigger_text, text_callback.id)
+      Teiserver.store_put(:text_callback_trigger_lookup, trigger_text, text_callback.id)
     end)
 
     args
@@ -139,15 +140,50 @@ defmodule Teiserver.Communication.TextCallbackLib do
       |> String.trim()
       |> String.downcase()
 
-    case Central.store_get(:text_callback_trigger_lookup, trigger) do
+    case Teiserver.store_get(:text_callback_trigger_lookup, trigger) do
       nil ->
         nil
 
       id ->
-        case Central.store_get(:text_callback_store, id) do
+        case Teiserver.store_get(:text_callback_store, id) do
           nil -> nil
           text_callback -> text_callback
         end
     end
+  end
+
+  @spec can_trigger_callback?(non_neg_integer() | TextCallback.t(), non_neg_integer()) ::
+          TextCallback.t() | nil
+  def can_trigger_callback?(nil, _), do: false
+  def can_trigger_callback?(_, nil), do: false
+
+  def can_trigger_callback?(tc_id, channel_id) when is_integer(tc_id) do
+    text_callback = Communication.get_text_callback(tc_id)
+    can_trigger_callback?(text_callback, channel_id)
+  end
+
+  def can_trigger_callback?(text_callback, channel_id) do
+    last_triggered_time =
+      (text_callback.last_triggered || %{})
+      |> Map.get(to_string(channel_id), 0)
+
+    now = System.system_time(:second)
+
+    minimum_repeat_time =
+      text_callback
+      |> Map.get(:rules, %{})
+      |> Map.get(:minimum_repeat_time, 60)
+
+    # And now the result
+    now - last_triggered_time > minimum_repeat_time
+  end
+
+  @spec set_last_triggered_time(TextCallback.t(), non_neg_integer()) :: any
+  def set_last_triggered_time(text_callback, channel_id) do
+    new_times =
+      (text_callback.last_triggered || %{})
+      |> Map.put(to_string(channel_id), System.system_time(:second))
+
+    Communication.update_text_callback(text_callback, %{last_triggered: new_times})
   end
 end

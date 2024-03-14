@@ -3,13 +3,13 @@ defmodule TeiserverWeb.ClientLive.Show do
   alias Phoenix.PubSub
   require Logger
 
-  alias Teiserver.{Account, Client, User, Battle}
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  alias Teiserver.{Account, Client, CacheUser, Battle}
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   alias Teiserver.Account.UserLib
 
   @extra_menu_content """
   &nbsp;&nbsp;&nbsp;
-    <a href='/teiserver/battle/lobbies' class="btn btn-outline-primary">
+    <a href='/battle/lobbies' class="btn btn-outline-primary">
       <i class="fa-solid fa-fw fa-swords"></i>
       Battles
     </a>
@@ -20,18 +20,17 @@ defmodule TeiserverWeb.ClientLive.Show do
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> TSAuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
 
     current_client = Account.get_client_by_id(socket.assigns[:current_user].id)
 
     :ok =
       PubSub.subscribe(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_messages:#{socket.assigns[:current_user].id}"
       )
 
-    socket = socket
+    socket =
+      socket
       |> add_breadcrumb(name: "Teiserver", url: "/teiserver")
       |> add_breadcrumb(name: "Admin", url: "/teiserver/admin")
       |> add_breadcrumb(name: "Clients", url: "/teiserver/admin/client")
@@ -40,7 +39,7 @@ defmodule TeiserverWeb.ClientLive.Show do
       |> assign(:view_colour, UserLib.colours())
       |> assign(:extra_menu_content, @extra_menu_content)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -48,9 +47,9 @@ defmodule TeiserverWeb.ClientLive.Show do
     case allow?(socket.assigns[:current_user], "Moderator") do
       true ->
         id = int_parse(id)
-        PubSub.subscribe(Central.PubSub, "teiserver_client_watch:#{id}")
+        PubSub.subscribe(Teiserver.PubSub, "teiserver_client_watch:#{id}")
         client = Account.get_client_by_id(id)
-        user = User.get_user_by_id(id)
+        user = CacheUser.get_user_by_id(id)
 
         connection_state =
           cond do
@@ -70,19 +69,19 @@ defmodule TeiserverWeb.ClientLive.Show do
         client_debug_messages = Map.get(connection_state, :print_client_messages, false)
 
         {:noreply,
-          socket
-          |> assign(:page_title, page_title(socket.assigns.live_action))
-          |> add_breadcrumb(name: user.name, url: "/teiserver/admin/clients/#{id}")
-          |> assign(:id, id)
-          |> assign(:client, client)
-          |> assign(:user, user)
-          |> assign(:client_debug_messages, client_debug_messages)
-          |> assign(:server_debug_messages, server_debug_messages)}
+         socket
+         |> assign(:page_title, page_title(socket.assigns.live_action))
+         |> add_breadcrumb(name: user.name, url: "/teiserver/admin/clients/#{id}")
+         |> assign(:id, id)
+         |> assign(:client, client)
+         |> assign(:user, user)
+         |> assign(:client_debug_messages, client_debug_messages)
+         |> assign(:server_debug_messages, server_debug_messages)}
 
       false ->
         {:noreply,
          socket
-         |> redirect(to: Routes.general_page_path(socket, :index))}
+         |> redirect(to: ~p"/")}
     end
   end
 
@@ -99,33 +98,32 @@ defmodule TeiserverWeb.ClientLive.Show do
   # Watched client
   def handle_info(%{channel: "teiserver_client_watch:" <> _, event: :connected}, socket) do
     client = Account.get_client_by_id(socket.assigns.id)
+
     {:noreply,
-    socket
-    |> assign(:client, client)
-    }
+     socket
+     |> assign(:client, client)}
   end
 
   def handle_info(%{channel: "teiserver_client_watch:" <> _, event: :disconnected}, socket) do
     {:noreply,
-    socket
-    |> assign(:client, nil)
-    }
+     socket
+     |> assign(:client, nil)}
   end
 
   def handle_info(%{channel: "teiserver_client_watch:" <> _, event: :added_to_lobby}, socket) do
     client = Account.get_client_by_id(socket.assigns.id)
+
     {:noreply,
-    socket
-    |> assign(:client, client)
-    }
+     socket
+     |> assign(:client, client)}
   end
 
   def handle_info(%{channel: "teiserver_client_watch:" <> _, event: :left_lobby}, socket) do
     client = Account.get_client_by_id(socket.assigns.id)
+
     {:noreply,
-    socket
-    |> assign(:client, client)
-    }
+     socket
+     |> assign(:client, client)}
   end
 
   def handle_info(%{channel: "teiserver_client_watch:" <> _}, socket) do
@@ -134,15 +132,15 @@ defmodule TeiserverWeb.ClientLive.Show do
 
   # Our client
   def handle_info(%{channel: "teiserver_client_messages:" <> _, event: :connected}, socket) do
-  {:noreply,
-    socket
-    |> assign(:current_client, Account.get_client_by_id(socket.assigns.current_user.id))}
+    {:noreply,
+     socket
+     |> assign(:current_client, Account.get_client_by_id(socket.assigns.current_user.id))}
   end
 
   def handle_info(%{channel: "teiserver_client_messages:" <> _, event: :disconnected}, socket) do
     {:noreply,
-    socket
-    |> assign(:current_client, nil)}
+     socket
+     |> assign(:current_client, nil)}
   end
 
   def handle_info(%{channel: "teiserver_client_messages:" <> _}, socket) do
@@ -194,7 +192,7 @@ defmodule TeiserverWeb.ClientLive.Show do
   end
 
   def handle_event("force-flood", _event, socket) do
-    User.set_flood_level(socket.assigns[:id], 100)
+    CacheUser.set_flood_level(socket.assigns[:id], 100)
     Client.disconnect(socket.assigns[:id], "flood protection")
     {:noreply, socket |> redirect(to: Routes.ts_admin_client_index_path(socket, :index))}
   end

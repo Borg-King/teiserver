@@ -1,15 +1,17 @@
 defmodule Teiserver.Bridge.BridgeServer do
   @moduledoc """
-  The server used to read events from Teiserver and then use the DiscordBridge to send onwards
+  The server used to read events from Teiserver and then use the DiscordBridgeBot to send onwards
   """
   use GenServer
-  alias Teiserver.{Account, Room, User}
+  alias Teiserver.{Account, Room, CacheUser}
   alias Teiserver.Chat.WordLib
   alias Phoenix.PubSub
   alias Teiserver.Config
   require Logger
   alias Teiserver.Data.Types, as: T
   alias Nostrum.Api
+
+  def bot_name(), do: "DiscordBridgeBot"
 
   @spec start_link(List.t()) :: :ignore | {:error, any} | {:ok, pid}
   def start_link(opts) do
@@ -18,24 +20,37 @@ defmodule Teiserver.Bridge.BridgeServer do
 
   @spec get_bridge_userid() :: T.userid()
   def get_bridge_userid() do
-    Central.cache_get(:application_metadata_cache, "teiserver_bridge_userid")
+    Teiserver.cache_get(:application_metadata_cache, "teiserver_bridge_userid")
   end
 
-  @spec get_bridge_pid() :: pid
-  def get_bridge_pid() do
-    Central.cache_get(:application_metadata_cache, "teiserver_bridge_pid")
+  @spec call_bridge(any()) :: any()
+  def call_bridge(message) do
+    bridge_pid = get_bridge_pid()
+    GenServer.call(bridge_pid, message)
+  end
+
+  @spec cast_bridge(any()) :: :ok
+  def cast_bridge(message) do
+    bridge_pid = get_bridge_pid()
+    GenServer.cast(bridge_pid, message)
+  end
+
+  @spec send_bridge(any()) :: :ok
+  def send_bridge(message) do
+    bridge_pid = get_bridge_pid()
+    send(bridge_pid, message)
   end
 
   @spec send_direct_message(T.user_id(), String.t()) :: :ok | nil
   def send_direct_message(userid, message) do
-    user = User.get_user_by_id(userid)
+    user = Account.get_user_by_id(userid)
 
     cond do
-      user.discord_dm_channel == nil ->
+      user.discord_dm_channel && user.discord_dm_channel_id == nil ->
         nil
 
       true ->
-        channel_id = user.discord_dm_channel
+        channel_id = user.discord_dm_channel_id || user.discord_dm_channel
         Api.create_message(channel_id, message)
     end
   end
@@ -58,10 +73,15 @@ defmodule Teiserver.Bridge.BridgeServer do
     {:noreply, %{state | client: Map.merge(state.client, partial_client)}}
   end
 
+  # The bridge is ready to start doing stuff
+  def handle_cast(:READY, state) do
+    {:noreply, state}
+  end
+
   @impl true
   def handle_info(:begin, _state) do
     state =
-      if Central.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") !=
+      if Teiserver.cache_get(:application_metadata_cache, "teiserver_full_startup_completed") !=
            true do
         pid = self()
 
@@ -76,8 +96,7 @@ defmodule Teiserver.Bridge.BridgeServer do
     {:noreply, state}
   end
 
-  # bridge_pid = Teiserver.Bridge.BridgeServer.get_bridge_pid()
-  # send(bridge_pid, :recache)
+  # Teiserver.Bridge.BridgeServer.send_bridge(bridge_pid, :recache)
   def handle_info(:recache, state) do
     Logger.info("Recaching")
     {:noreply, build_local_caches(state)}
@@ -121,7 +140,7 @@ defmodule Teiserver.Bridge.BridgeServer do
     do: {:noreply, state}
 
   def handle_info({:new_message, from_id, room_name, message}, state) do
-    user = User.get_user_by_id(from_id)
+    user = Account.get_user_by_id(from_id)
 
     cond do
       from_id == state.userid ->
@@ -137,7 +156,7 @@ defmodule Teiserver.Bridge.BridgeServer do
       message_starts_with?(message, "/") ->
         nil
 
-      User.is_restricted?(user, ["Bridging"]) ->
+      CacheUser.is_restricted?(user, ["Bridging"]) ->
         # Non-bridged user, ignore it
         nil
 
@@ -161,7 +180,7 @@ defmodule Teiserver.Bridge.BridgeServer do
           end
 
         # If they are a bot they're only allowed to post to the promotion channel
-        if User.is_bot?(user) do
+        if CacheUser.is_bot?(user) do
           if room_name == "promote" do
             forward_to_discord(from_id, state.channel_lookup[room_name], message, state)
           end
@@ -184,9 +203,9 @@ defmodule Teiserver.Bridge.BridgeServer do
         data = %{channel: "teiserver_client_messages:" <> _, event: :received_direct_message},
         state
       ) do
-    username = User.get_username(data.sender_id)
+    username = CacheUser.get_username(data.sender_id)
 
-    User.send_direct_message(
+    CacheUser.send_direct_message(
       state.userid,
       data.sender_id,
       "I don't currently handle messages, sorry #{username}"
@@ -198,36 +217,32 @@ defmodule Teiserver.Bridge.BridgeServer do
   def handle_info(%{channel: "teiserver_client_messages:" <> _}, state), do: {:noreply, state}
 
   def handle_info(%{channel: "teiserver_server", event: :started}, state) do
-    channels =
-      Application.get_env(:central, DiscordBridge)[:bridges]
-      |> Enum.filter(fn {_, name} -> name == "server-updates" end)
+    if Config.get_site_config_cache("teiserver.Bridge from server") do
+      # Main
+      channel_id = Config.get_site_config_cache("teiserver.Discord channel #main")
 
-    case channels do
-      [{channel_id, _}] ->
-        if Config.get_site_config_cache("teiserver.Bridge from server") do
-          Api.create_message(channel_id, "Teiserver startup for node #{Teiserver.node_name()}")
-        end
+      if channel_id do
+        Api.create_message(channel_id, "Teiserver startup for node #{Teiserver.node_name()}")
+      end
 
-      _ ->
-        :ok
+      # Server
+      channel_id = Config.get_site_config_cache("teiserver.Discord channel #server-updates")
+
+      if channel_id do
+        Api.create_message(channel_id, "Teiserver startup for node #{Teiserver.node_name()}")
+      end
     end
 
     {:noreply, state}
   end
 
   def handle_info(%{channel: "teiserver_server", event: :prep_stop}, state) do
-    channels =
-      Application.get_env(:central, DiscordBridge)[:bridges]
-      |> Enum.filter(fn {_, name} -> name == "server-updates" end)
+    if Config.get_site_config_cache("teiserver.Bridge from server") do
+      channel_id = Config.get_site_config_cache("teiserver.Discord channel #server-updates")
 
-    case channels do
-      [{channel_id, _}] ->
-        if Config.get_site_config_cache("teiserver.Bridge from server") do
-          Api.create_message(channel_id, "Teiserver shutdown for node #{Teiserver.node_name()}")
-        end
-
-      _ ->
-        :ok
+      if channel_id do
+        Api.create_message(channel_id, "Teiserver shutdown for node #{Teiserver.node_name()}")
+      end
     end
 
     {:noreply, state}
@@ -238,7 +253,7 @@ defmodule Teiserver.Bridge.BridgeServer do
   # pid = Teiserver.Bridge.BridgeServer.get_bridge_pid()
   # send(pid, :gdt_check)
   def handle_info(:gdt_check, state) do
-    Api.list_guild_threads(Application.get_env(:central, DiscordBridge)[:guild_id])
+    Api.list_guild_threads(Application.get_env(:teiserver, DiscordBridgeBot)[:guild_id])
 
     # Api.list_joined_private_archived_threads(channel_id)
     # When a thread in 👇｜game-design-team has gone 48 hours without any new messages:
@@ -287,8 +302,8 @@ defmodule Teiserver.Bridge.BridgeServer do
   defp do_begin() do
     Logger.debug("Starting up Bridge server")
     account = get_bridge_account()
-    Central.cache_put(:application_metadata_cache, "teiserver_bridge_userid", account.id)
-    {:ok, user, client} = User.internal_client_login(account.id)
+    Teiserver.cache_put(:application_metadata_cache, "teiserver_bridge_userid", account.id)
+    {:ok, user, client} = CacheUser.internal_client_login(account.id)
 
     state = %{
       ip: "127.0.0.1",
@@ -296,11 +311,12 @@ defmodule Teiserver.Bridge.BridgeServer do
       username: user.name,
       lobby_host: false,
       user: user,
-      client: client
+      client: client,
+      recent_bridged_messages: %{}
     }
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_server")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_client_messages:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_server")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_client_messages:#{user.id}")
 
     build_local_caches(state)
   end
@@ -353,12 +369,12 @@ defmodule Teiserver.Bridge.BridgeServer do
       Room.get_or_make_room(room_name, state.user.id)
       Room.add_user_to_room(state.user.id, room_name)
 
-      :ok = PubSub.unsubscribe(Central.PubSub, "room:#{room_name}")
-      :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+      :ok = PubSub.unsubscribe(Teiserver.PubSub, "room:#{room_name}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
     end)
 
-    Central.store_put(:application_metadata_cache, :discord_room_lookup, room_lookup)
-    Central.store_put(:application_metadata_cache, :discord_channel_lookup, channel_lookup)
+    Teiserver.store_put(:application_metadata_cache, :discord_room_lookup, room_lookup)
+    Teiserver.store_put(:application_metadata_cache, :discord_channel_lookup, channel_lookup)
 
     Map.merge(state, %{
       channel_lookup: channel_lookup,
@@ -367,7 +383,7 @@ defmodule Teiserver.Bridge.BridgeServer do
   end
 
   defp forward_to_discord(from_id, channel, message, _state) do
-    author = User.get_username(from_id)
+    author = CacheUser.get_username(from_id)
 
     new_message =
       message
@@ -377,13 +393,13 @@ defmodule Teiserver.Bridge.BridgeServer do
   end
 
   defp convert_emoticons(message) do
-    emoticon_map = Teiserver.Bridge.DiscordBridge.get_text_to_emoticon_map()
+    emoticon_map = Teiserver.Bridge.DiscordBridgeBot.get_text_to_emoticon_map()
 
     message
     |> String.replace(Map.keys(emoticon_map), fn text -> emoticon_map[text] end)
   end
 
-  @spec get_bridge_account() :: Central.Account.User.t()
+  @spec get_bridge_account() :: Teiserver.Account.CacheUser.t()
   def get_bridge_account() do
     user =
       Account.get_user(nil,
@@ -396,26 +412,26 @@ defmodule Teiserver.Bridge.BridgeServer do
       nil ->
         # Make account
         {:ok, account} =
-          Account.create_user(%{
-            name: "DiscordBridge",
+          Account.script_create_user(%{
+            name: bot_name(),
             email: "bridge@teiserver",
             icon: "fa-brands fa-discord",
             colour: "#0066AA",
             password: Account.make_bot_password(),
+            roles: ["Bot", "Verified"],
             data: %{
               bot: true,
               moderator: false,
               verified: true,
-              lobby_client: "Teiserver Internal Process",
-              roles: ["Bot", "Verified"]
+              lobby_client: "Teiserver Internal Process"
             }
           })
 
         Account.update_user_stat(account.id, %{
-          country_override: Application.get_env(:central, Teiserver)[:server_flag]
+          country_override: Application.get_env(:teiserver, Teiserver)[:server_flag]
         })
 
-        User.recache_user(account.id)
+        CacheUser.recache_user(account.id)
         account
 
       account ->
@@ -460,12 +476,12 @@ defmodule Teiserver.Bridge.BridgeServer do
   @impl true
   @spec init(Map.t()) :: {:ok, Map.t()}
   def init(_opts) do
-    if Application.get_env(:central, Teiserver)[:enable_discord_bridge] do
+    if Teiserver.Communication.use_discord?() do
       send(self(), :begin)
     end
 
     Logger.metadata(request_id: "BridgeServer")
-    Central.cache_put(:application_metadata_cache, "teiserver_bridge_pid", self())
+    Teiserver.cache_put(:application_metadata_cache, "teiserver_bridge_pid", self())
 
     Horde.Registry.register(
       Teiserver.ServerRegistry,
@@ -474,5 +490,10 @@ defmodule Teiserver.Bridge.BridgeServer do
     )
 
     {:ok, %{}}
+  end
+
+  @spec get_bridge_pid() :: pid
+  defp get_bridge_pid() do
+    Teiserver.cache_get(:application_metadata_cache, "teiserver_bridge_pid")
   end
 end

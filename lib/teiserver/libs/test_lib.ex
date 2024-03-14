@@ -1,9 +1,11 @@
 defmodule Teiserver.TeiserverTestLib do
   @moduledoc false
-  alias Teiserver.{Client, User, Account, SpringIdServer}
+  alias Teiserver.{Client, CacheUser, Account}
+  alias Teiserver.Lobby.LobbyLib
   alias Teiserver.Account.AccoladeLib
   alias Teiserver.Protocols.TachyonLib
   alias Teiserver.Coordinator.CoordinatorServer
+  alias Teiserver.Data.Types, as: T
   @host '127.0.0.1'
 
   @spec raw_setup :: %{socket: port()}
@@ -45,10 +47,10 @@ defmodule Teiserver.TeiserverTestLib do
   def new_user(name \\ nil, params \\ %{}) do
     name = name || new_user_name()
 
-    case User.get_user_by_name(name) do
+    case CacheUser.get_user_by_name(name) do
       nil ->
         {:ok, user} =
-          User.user_register_params_with_md5(
+          CacheUser.user_register_params_with_md5(
             name,
             "#{name}@email.com",
             "X03MO1qnZdYdgyfeuILPmQ==",
@@ -62,10 +64,9 @@ defmodule Teiserver.TeiserverTestLib do
         })
 
         user
-        |> User.convert_user()
-        |> Map.put(:springid, SpringIdServer.get_next_id())
-        |> User.add_user()
-        |> User.verify_user()
+        |> CacheUser.convert_user()
+        |> CacheUser.add_user()
+        |> CacheUser.verify_user()
 
       _ ->
         new_user()
@@ -76,9 +77,9 @@ defmodule Teiserver.TeiserverTestLib do
   def async_auth_setup(protocol, user \\ nil) do
     user = if user, do: user, else: new_user()
 
-    token = User.create_token(user)
+    token = CacheUser.create_token(user)
 
-    case User.try_login(token, "127.0.0.1", "AsyncTest", "token1 token2") do
+    case CacheUser.try_login(token, "127.0.0.1", "AsyncTest", "token1 token2") do
       {:ok, _user} -> :ok
       value -> raise "Error setting up user - #{Kernel.inspect(value)}"
     end
@@ -121,7 +122,7 @@ defmodule Teiserver.TeiserverTestLib do
   @spec tachyon_auth_setup(nil | Map.t()) :: %{socket: port(), user: Map.t(), pid: pid()}
   def tachyon_auth_setup(user \\ nil) do
     user = if user, do: user, else: new_user()
-    token = User.create_token(user)
+    token = CacheUser.create_token(user)
 
     %{socket: socket} = tachyon_tls_setup()
 
@@ -135,7 +136,15 @@ defmodule Teiserver.TeiserverTestLib do
     }
 
     _tachyon_send(socket, data)
-    _tachyon_recv(socket)
+    reply = _tachyon_recv(socket)
+
+    case reply do
+      [%{"result" => "unverified"} | _] ->
+        raise "You are creating a user without verifying in"
+
+      _ ->
+        :ok
+    end
 
     pid = Client.get_client_by_id(user.id).tcp_pid
     %{socket: socket, user: user, pid: pid}
@@ -399,19 +408,29 @@ defmodule Teiserver.TeiserverTestLib do
   @spec conn_setup({:ok, List.t()}) :: {:ok, List.t()}
   def conn_setup({:ok, data}) do
     user = data[:user]
-    User.recache_user(user.id)
+    CacheUser.recache_user(user.id)
 
     {:ok, data}
   end
 
-  @spec root_permissions() :: [String.t()]
-  def root_permissions do
-    admin_permissions() ++ ["admin.dev.developer"]
+  @spec server_permissions() :: [String.t()]
+  def server_permissions do
+    ["Server"] ++ admin_permissions()
   end
 
   @spec admin_permissions() :: [String.t()]
   def admin_permissions do
-    ["Server", "Admin"] ++ staff_permissions()
+    ["Admin", "Moderator"] ++ staff_permissions()
+  end
+
+  @spec moderator_permissions() :: [String.t()]
+  def moderator_permissions do
+    ["Moderator"] ++ overwatch_permissions()
+  end
+
+  @spec overwatch_permissions() :: [String.t()]
+  def overwatch_permissions do
+    ["Overwatch"]
   end
 
   @spec staff_permissions() :: [String.t()]
@@ -442,6 +461,36 @@ defmodule Teiserver.TeiserverTestLib do
       )
 
     c
+  end
+
+  @spec make_lobby() :: {T.lobby_id(), pid}
+  @spec make_lobby(map()) :: {T.lobby_id(), pid}
+  def make_lobby(params \\ %{}) do
+    host = new_user()
+
+    lobby =
+      %{
+        id: :rand.uniform(999_999_999_999_999),
+        founder_id: host.id,
+        founder_name: host.name,
+        cmd: "c.lobby.create",
+        name: "ServerName",
+        nattype: "none",
+        port: 1234,
+        game_hash: "string_of_characters",
+        map_hash: "string_of_characters",
+        map_name: "koom valley",
+        game_name: "BAR",
+        engine_name: "spring-105",
+        engine_version: "105.1.2.3",
+        settings: %{
+          max_players: 12
+        }
+      }
+      |> Map.merge(params)
+
+    lobby_pid = LobbyLib.start_lobby_server(lobby)
+    {lobby.id, lobby_pid}
   end
 
   @spec make_clan_membership(Integer.t(), Integer.t(), Map.t()) ::
@@ -502,8 +551,8 @@ defmodule Teiserver.TeiserverTestLib do
       ip: "127.0.0.1"
     }
     |> Map.merge(params)
-    |> Teiserver.Battle.Lobby.create_lobby()
-    |> Teiserver.Battle.Lobby.add_lobby()
+    |> Teiserver.Lobby.create_lobby()
+    |> Teiserver.Lobby.add_lobby()
   end
 
   defp seed_badge_types() do
@@ -514,7 +563,7 @@ defmodule Teiserver.TeiserverTestLib do
           name: "Badge A",
           icon: "i",
           colour: "c",
-          purposes: ["Accolade"],
+          purpose: "Accolade",
           description: "Description for the first badge"
         })
 
@@ -523,7 +572,7 @@ defmodule Teiserver.TeiserverTestLib do
           name: "Badge B",
           icon: "i",
           colour: "c",
-          purposes: ["Accolade"],
+          purpose: "Accolade",
           description: "Description for the second badge"
         })
 
@@ -532,10 +581,26 @@ defmodule Teiserver.TeiserverTestLib do
           name: "Badge C",
           icon: "i",
           colour: "c",
-          purposes: ["Accolade"],
+          purpose: "Accolade",
           description: "Description for the third badge"
         })
     end
+  end
+
+  def create_moderation_user_report(target_id, reporter_id, params \\ %{}) do
+    Teiserver.Moderation.create_report_group_and_report(
+      Map.merge(
+        %{
+          reporter_id: reporter_id,
+          target_id: target_id,
+          type: "chat",
+          sub_type: "hate",
+          extra_text: "default extra text",
+          match_id: nil
+        },
+        params
+      )
+    )
   end
 
   def seed() do
@@ -552,7 +617,13 @@ defmodule Teiserver.TeiserverTestLib do
     Teiserver.Game.get_or_add_rating_type("Team")
     Teiserver.Game.get_or_add_rating_type("FFA")
 
-    Teiserver.Telemetry.get_or_add_event_type("account.user_login")
+    Teiserver.Telemetry.get_or_add_complex_server_event_type("Server startup")
+    Teiserver.Telemetry.get_or_add_simple_server_event_type("account.user_login")
+    Teiserver.Telemetry.get_or_add_simple_server_event_type("lobby.force_add_user_to_lobby")
+    Teiserver.Telemetry.get_or_add_complex_client_event_type("client.user_event")
+    Teiserver.Telemetry.get_or_add_complex_client_event_type("client.user_event")
+
+    Teiserver.Telemetry.get_or_add_simple_lobby_event_type("remove_user_from_lobby")
 
     seed_badge_types()
   end

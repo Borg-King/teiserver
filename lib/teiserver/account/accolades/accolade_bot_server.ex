@@ -4,7 +4,7 @@ defmodule Teiserver.Account.AccoladeBotServer do
   """
   use GenServer
   alias Teiserver.Config
-  alias Teiserver.{Account, User, Room, Battle, Coordinator}
+  alias Teiserver.{Account, CacheUser, Room, Battle, Coordinator}
   alias Teiserver.Coordinator.CoordinatorCommands
   alias Teiserver.Account.AccoladeLib
   alias Phoenix.PubSub
@@ -38,10 +38,10 @@ defmodule Teiserver.Account.AccoladeBotServer do
   def handle_info(:begin, _state) do
     Logger.debug("Starting up Accolade server")
     account = get_accolade_account()
-    Central.cache_put(:application_metadata_cache, "teiserver_accolade_userid", account.id)
+    Teiserver.cache_put(:application_metadata_cache, "teiserver_accolade_userid", account.id)
 
     {user, client} =
-      case User.internal_client_login(account.id) do
+      case CacheUser.internal_client_login(account.id) do
         {:ok, user, client} -> {user, client}
         :error -> raise "No accolade user found"
       end
@@ -57,15 +57,15 @@ defmodule Teiserver.Account.AccoladeBotServer do
     |> Enum.each(fn room_name ->
       Room.get_or_make_room(room_name, user.id)
       Room.add_user_to_room(user.id, room_name)
-      :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+      :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
     end)
 
-    :ok = PubSub.subscribe(Central.PubSub, "legacy_user_updates:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "legacy_user_updates:#{user.id}")
 
     # We only subscribe to this if we're not in test, if we are it'll generate a bunch of SQL errors
     # without actually breaking anything
-    if not Application.get_env(:central, Teiserver)[:test_mode] do
-      :ok = PubSub.subscribe(Central.PubSub, "global_match_updates")
+    if not Application.get_env(:teiserver, Teiserver)[:test_mode] do
+      :ok = PubSub.subscribe(Teiserver.PubSub, "global_match_updates")
     end
 
     {:noreply, state}
@@ -125,10 +125,10 @@ defmodule Teiserver.Account.AccoladeBotServer do
   end
 
   def handle_info({:direct_message, userid, message}, state) do
-    if not User.is_bot?(userid) do
+    if not CacheUser.is_bot?(userid) do
       case AccoladeLib.cast_accolade_chat(userid, {:user_message, message}) do
         nil ->
-          User.send_direct_message(
+          CacheUser.send_direct_message(
             state.userid,
             userid,
             "I'm not currently awaiting feedback for a player"
@@ -143,7 +143,7 @@ defmodule Teiserver.Account.AccoladeBotServer do
   end
 
   def handle_info({:new_accolade, userid}, state) do
-    User.send_direct_message(
+    CacheUser.send_direct_message(
       state.userid,
       userid,
       "You have been awarded a new accolade send $whoami to myself to see your collection."
@@ -167,7 +167,7 @@ defmodule Teiserver.Account.AccoladeBotServer do
     {:noreply, state}
   end
 
-  @spec get_accolade_account() :: Central.Account.User.t()
+  @spec get_accolade_account() :: Teiserver.Account.CacheUser.t()
   def get_accolade_account() do
     user =
       Account.get_user(nil,
@@ -180,26 +180,26 @@ defmodule Teiserver.Account.AccoladeBotServer do
       nil ->
         # Make account
         {:ok, account} =
-          Account.create_user(%{
+          Account.script_create_user(%{
             name: "AccoladesBot",
             email: "accolades_bot@teiserver",
             icon:
               "fa-solid #{Teiserver.Account.AccoladeLib.icon()}" |> String.replace(" far ", " "),
             colour: "#0066AA",
             password: Account.make_bot_password(),
+            roles: ["Bot", "Verified"],
             data: %{
               bot: true,
               moderator: false,
-              lobby_client: "Teiserver Internal Process",
-              roles: ["Bot", "Verified"]
+              lobby_client: "Teiserver Internal Process"
             }
           })
 
         Account.update_user_stat(account.id, %{
-          country_override: Application.get_env(:central, Teiserver)[:server_flag]
+          country_override: Application.get_env(:teiserver, Teiserver)[:server_flag]
         })
 
-        User.recache_user(account.id)
+        CacheUser.recache_user(account.id)
         account
 
       account ->

@@ -1,10 +1,10 @@
 defmodule Teiserver.Chat.WordLib do
   @moduledoc false
   alias Teiserver.Config
-  alias Central.Helpers.StringHelper
+  alias Teiserver.Helper.StringHelper
   require Logger
 
-  @flagged_regex ~r/(n[i1l]gg(:?[e3]r|a)|cun[t7][s5]?|\b(r[e3])?[t7]ards?\b)/iu
+  @flagged_regex ~r/(n[i1l]gg(:?[e3]r|a)|cun[t7][s5]?|\b(r[e3])?[t7]ards?\b|卐)/iu
   @blacklisted_regexs [
     ~r(superinnapropriateword),
     ~r(anotherreallybadword)
@@ -32,7 +32,7 @@ defmodule Teiserver.Chat.WordLib do
   # end
 
   # Curse words in group A are very bad and treated worse, C are casual and scored less harshly
-  @curse_words_a ~w(nigger) |> StringHelper.plurals() |> List.flatten()
+  @curse_words_a ~w(nigger 卐) |> StringHelper.plurals() |> List.flatten()
   @curse_words_b ~w(cunt retard tards) |> StringHelper.plurals() |> List.flatten()
   @curse_words_c ~w(shit fuck faggot) |> StringHelper.plurals() |> List.flatten()
 

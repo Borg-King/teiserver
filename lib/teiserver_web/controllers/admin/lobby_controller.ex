@@ -1,26 +1,25 @@
 defmodule TeiserverWeb.Admin.LobbyController do
-  use CentralWeb, :controller
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  use TeiserverWeb, :controller
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   alias Teiserver.{Chat, Battle}
   alias Teiserver.Battle.MatchLib
 
   plug(AssignPlug,
-    site_menu_active: "teiserver_admin",
+    site_menu_active: "admin",
     sub_menu_active: "match"
   )
 
   plug(Bodyguard.Plug.Authorize,
-    policy: Teiserver.Staff.Reviewer,
+    policy: Teiserver.Staff.Overwatch,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
   )
 
-  plug(:add_breadcrumb, name: 'Teiserver', url: '/teiserver')
   plug(:add_breadcrumb, name: 'Admin', url: '/teiserver/admin')
   plug(:add_breadcrumb, name: 'Users', url: '/teiserver/admin/user')
 
-  @page_size 300
+  @page_size 500
 
   @spec lobby_chat(Plug.Conn.t(), map) :: Plug.Conn.t()
   def lobby_chat(conn, params = %{"id" => match_id}) do

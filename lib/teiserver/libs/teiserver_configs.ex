@@ -1,21 +1,18 @@
 defmodule Teiserver.TeiserverConfigs do
   @moduledoc false
-  import Teiserver.Config, only: [add_site_config_type: 1, add_user_config_type: 1]
+  import Teiserver.Config, only: [add_site_config_type: 1]
 
   @spec teiserver_configs :: any
   def teiserver_configs do
-    # User configs
-    user_configs()
-
     # Site based configs
     site_configs()
-    system_configs()
     login_configs()
     legacy_protocol_configs()
     moderation_configs()
     discord_configs()
     lobby_configs()
     debugging_configs()
+    profile_configs()
   end
 
   @spec site_configs :: any
@@ -112,50 +109,16 @@ defmodule Teiserver.TeiserverConfigs do
       description: "Prevents users logging in with anything other than Chobby",
       default: false
     })
-  end
 
-  @spec user_configs() :: any
-  defp user_configs() do
-    add_user_config_type(%{
-      key: "teiserver.Show flag",
-      section: "Teiserver account",
-      type: "boolean",
-      visible: true,
-      permissions: ["account"],
-      description:
-        "When checked the flag associated with your IP will be displayed. If unchecked your flag will be blank. This will take effect next time you login with your client.",
-      default: true
-    })
-
-    add_user_config_type(%{
-      key: "teiserver.Discord notifications",
-      section: "Teiserver account",
-      type: "boolean",
-      visible: true,
-      permissions: ["account"],
-      description:
-        "When checked you will receive discord messages from the Teiserver bridge bot for various in-lobby events. When disabled you will receive no notifications even if the others are enabled.",
-      default: true
-    })
-
-    add_user_config_type(%{
-      key: "teiserver.Notify - Exited the queue",
-      section: "Teiserver account",
-      type: "boolean",
-      visible: true,
-      permissions: ["account"],
-      description: "You will be messaged when you move from being in the queue to being a player",
-      default: true
-    })
-
-    add_user_config_type(%{
-      key: "teiserver.Notify - Game start",
-      section: "Teiserver account",
-      type: "boolean",
-      visible: true,
-      permissions: ["account"],
-      description: "You will be messaged when a lobby you are a player in starts",
-      default: true
+    add_site_config_type(%{
+      key: "site.Main site link",
+      section: "Site management",
+      type: "string",
+      permissions: ["Admin"],
+      description: "A link to an external site if this is not your main site.",
+      opts: [],
+      default: "",
+      value_label: "Link"
     })
   end
 
@@ -324,47 +287,6 @@ defmodule Teiserver.TeiserverConfigs do
     })
   end
 
-  defp system_configs() do
-    add_site_config_type(%{
-      key: "system.Redirect url",
-      section: "System",
-      type: "string",
-      permissions: ["Admin"],
-      description: "A redirect URL for those accessing the old server",
-      value_label: "The URL for the redirect"
-    })
-
-    add_site_config_type(%{
-      key: "system.Disconnect unauthenticated sockets",
-      section: "System",
-      type: "boolean",
-      default: false,
-      permissions: ["Admin"],
-      description: "When enabled sockets not authenticated after 60 seconds will be disconnected",
-      value_label: "Disconnect unauthenticated sockets"
-    })
-
-    add_site_config_type(%{
-      key: "system.Process matches",
-      section: "System",
-      type: "boolean",
-      permissions: ["Admin"],
-      description: "Enable/disable post processing of matches",
-      default: true,
-      value_label: "Enable"
-    })
-
-    add_site_config_type(%{
-      key: "system.Use geoip",
-      section: "System",
-      type: "boolean",
-      permissions: ["Admin"],
-      description: "When enabled you will use geoip for country code lookups",
-      default: true,
-      value_label: ""
-    })
-  end
-
   defp lobby_configs() do
     add_site_config_type(%{
       key: "teiserver.Uncertainty required to show rating",
@@ -438,6 +360,46 @@ defmodule Teiserver.TeiserverConfigs do
       permissions: ["Server"],
       description: "Points for the lightest of curse words",
       default: 1
+    })
+
+    add_site_config_type(%{
+      key: "lobby.Block count to prevent join",
+      section: "Lobbies",
+      type: "integer",
+      permissions: ["Admin"],
+      description:
+        "The raw number of users who would need to block someone to prevent them joining a lobby",
+      default: 8
+    })
+
+    add_site_config_type(%{
+      key: "lobby.Block percentage to prevent join",
+      section: "Lobbies",
+      type: "integer",
+      permissions: ["Admin"],
+      description:
+        "The percentage of users who would need to block someone to prevent them joining a lobby",
+      default: 66
+    })
+
+    add_site_config_type(%{
+      key: "lobby.Avoid count to prevent playing",
+      section: "Lobbies",
+      type: "integer",
+      permissions: ["Admin"],
+      description:
+        "The raw number of players who would need to avoid someone to prevent them becoming a player",
+      default: 4
+    })
+
+    add_site_config_type(%{
+      key: "lobby.Avoid percentage to prevent playing",
+      section: "Lobbies",
+      type: "integer",
+      permissions: ["Admin"],
+      description:
+        "The percentage of players who would need to avoid someone to prevent them becoming a player",
+      default: 50
     })
   end
 
@@ -601,6 +563,74 @@ defmodule Teiserver.TeiserverConfigs do
       default: false,
       permissions: ["Admin"],
       description: "Print all incoming messages"
+    })
+  end
+
+  @spec profile_configs() :: :ok
+  def profile_configs() do
+    add_site_config_type(%{
+      key: "profile.Rank method",
+      section: "Profiles",
+      type: "select",
+      default: "Leaderboard rating",
+      permissions: ["Admin"],
+      description: "The value used to assign rank icons at login",
+      opts: [choices: ["Leaderboard rating", "Rating value", "Playtime", "Role"]]
+    })
+
+    add_site_config_type(%{
+      key: "user.Enable one time links",
+      section: "User permissions",
+      type: "boolean",
+      permissions: ["Admin"],
+      description: "Allows users to login with one-time-links.",
+      opts: [],
+      default: false,
+      value_label: "Allow users to login via a one time link generated by the application."
+    })
+
+    add_site_config_type(%{
+      key: "user.Enable renames",
+      section: "User permissions",
+      type: "boolean",
+      permissions: ["Admin"],
+      description: "Users are able to change their name via the account page.",
+      opts: [],
+      default: true,
+      value_label: "Allow users to change their name"
+    })
+
+    add_site_config_type(%{
+      key: "user.Enable account group pages",
+      section: "User permissions",
+      type: "boolean",
+      permissions: ["Admin"],
+      description: "Users are able to view (and edit) their group memberships.",
+      opts: [],
+      default: true,
+      value_label: "Enable account group pages"
+    })
+
+    add_site_config_type(%{
+      key: "user.Enable user registrations",
+      section: "User permissions",
+      type: "select",
+      permissions: ["Admin"],
+      description: "Users are able to view (and edit) their group memberships.",
+      opts: [choices: ["Allowed", "Link only", "Disabled"]],
+      default: "Allowed",
+      value_label: "Enable account group pages"
+    })
+
+    add_site_config_type(%{
+      key: "user.Default light mode",
+      section: "Interface",
+      type: "boolean",
+      permissions: ["admin.admin"],
+      description: "When set to true the default view for users is light mode.",
+      opts: [],
+      default: false,
+      value_label: "Light mode as default"
     })
   end
 end

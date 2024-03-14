@@ -7,10 +7,10 @@ defmodule Teiserver.Logging.AggregateViewLogsTask do
   alias Teiserver.Logging.AggregateViewLog
   alias Teiserver.Logging.PageViewLogLib
 
-  alias Central.Repo
+  alias Teiserver.Repo
   import Ecto.Query, warn: false
-  import Central.Helpers.QueryHelpers
-  import Central.Helpers.NumberHelper, only: [c_round: 1]
+  import Teiserver.Helper.QueryHelpers
+  import Teiserver.Helper.NumberHelper, only: [c_round: 1]
   alias Decimal
 
   @log_keep_period 180

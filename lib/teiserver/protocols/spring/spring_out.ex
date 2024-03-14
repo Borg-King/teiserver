@@ -7,10 +7,10 @@ defmodule Teiserver.Protocols.SpringOut do
   """
   require Logger
   alias Phoenix.PubSub
-  alias Teiserver.{Account, User, Client, Room, Battle, Coordinator}
-  alias Teiserver.Battle.Lobby
+  alias Teiserver.{Account, CacheUser, Client, Room, Battle, Coordinator}
+  alias Teiserver.Lobby
   alias Teiserver.Protocols.Spring
-  alias Teiserver.Protocols.Spring.{BattleOut, LobbyPolicyOut}
+  alias Teiserver.Protocols.Spring.{BattleOut, LobbyPolicyOut, UserOut, SystemOut}
   alias Teiserver.Data.Types, as: T
 
   @motd """
@@ -33,10 +33,12 @@ defmodule Teiserver.Protocols.SpringOut do
       case namespace do
         :battle -> BattleOut.do_reply(reply_cmd, data, state)
         :lobby_policy -> LobbyPolicyOut.do_reply(reply_cmd, data, state)
+        :user -> UserOut.do_reply(reply_cmd, data, state)
+        :system -> SystemOut.do_reply(reply_cmd, data, state)
         :spring -> do_reply(reply_cmd, data)
       end
 
-    if Application.get_env(:central, Teiserver)[:extra_logging] == true or
+    if Application.get_env(:teiserver, Teiserver)[:extra_logging] == true or
          state.print_server_messages do
       if is_list(msg) do
         msg
@@ -81,7 +83,7 @@ defmodule Teiserver.Protocols.SpringOut do
   end
 
   defp do_reply(:redirect, url) do
-    "REDIRECT #{url} #{Application.get_env(:central, Teiserver)[:ports][:tcp]}\n"
+    "REDIRECT #{url} #{Application.get_env(:teiserver, Teiserver)[:ports][:tcp]}\n"
   end
 
   defp do_reply(:compflags, nil) do
@@ -98,7 +100,7 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:agreement, nil) do
     agreement_rows =
-      Application.get_env(:central, Teiserver)[:user_agreement]
+      Application.get_env(:teiserver, Teiserver)[:user_agreement]
       |> String.split("\n")
       |> Enum.map_join("\n", fn s -> "AGREEMENT #{s}" end)
 
@@ -111,6 +113,10 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:user_token, {email, token}) do
     "s.user.user_token #{email}\t#{token}\n"
+  end
+
+  defp do_reply(:okay, {cmd, msg}) do
+    "OK cmd=#{cmd}\t#{msg}\n"
   end
 
   defp do_reply(:okay, cmd) do
@@ -146,11 +152,11 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:friendlist, nil), do: "FRIENDLISTBEGIN\FRIENDLISTEND\n"
 
-  defp do_reply(:friendlist, user) do
+  defp do_reply(:friendlist, userid) do
     friends =
-      user.friends
+      Account.list_friend_ids_of_user(userid)
       |> Enum.map(fn f ->
-        name = User.get_username(f)
+        name = Account.get_username_by_id(f)
 
         if name do
           "FRIENDLIST userName=#{name}\n"
@@ -164,11 +170,11 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:friendlist_request, nil), do: "FRIENDLISTBEGIN\nFRIENDLISTEND\n"
 
-  defp do_reply(:friendlist_request, user) do
+  defp do_reply(:friendlist_request, userid) do
     requests =
-      user.friend_requests
+      Account.list_incoming_friend_requests_of_userid(userid)
       |> Enum.map(fn f ->
-        name = User.get_username(f)
+        name = Account.get_username_by_id(f)
         "FRIENDREQUESTLIST userName=#{name}\n"
       end)
 
@@ -178,11 +184,11 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:ignorelist, nil), do: "IGNORELISTBEGIN\IGNORELISTEND\n"
 
-  defp do_reply(:ignorelist, user) do
+  defp do_reply(:ignorelist, userid) do
     ignored =
-      user.ignored
+      Account.list_userids_ignored_by_userid(userid)
       |> Enum.map(fn f ->
-        name = User.get_username(f)
+        name = Account.get_username_by_id(f)
         "IGNORELIST userName=#{name}\n"
       end)
 
@@ -280,7 +286,7 @@ defmodule Teiserver.Protocols.SpringOut do
       keys
       |> Enum.reject(fn k -> Enum.member?(["", " "], k) end)
 
-    "REMOVESCRIPTTAGS " <> Enum.join(keys, "\t") <> "\n"
+    "REMOVESCRIPTTAGS " <> Enum.join(keys, " ") <> "\n"
   end
 
   defp do_reply(:enable_all_units, _units) do
@@ -349,12 +355,18 @@ defmodule Teiserver.Protocols.SpringOut do
 
   # Commands
   defp do_reply(:ring, {ringer_id, state_userid}) do
-    user = User.get_user_by_id(state_userid)
-    ringer_user = User.get_user_by_id(ringer_id)
+    ringer_user = Account.get_user_by_id(ringer_id)
 
-    if ringer_id not in (user.ignored || []) or ringer_user.moderator == true or
-         User.is_bot?(ringer_user) == true do
-      ringer_name = User.get_username(ringer_id)
+    do_ring =
+      cond do
+        CacheUser.is_moderator?(ringer_user) == true -> true
+        CacheUser.is_bot?(ringer_user) == true -> true
+        Account.does_a_ignore_b?(state_userid, ringer_id) -> false
+        true -> true
+      end
+
+    if do_ring do
+      ringer_name = Account.get_username_by_id(ringer_id)
       "RING #{ringer_name}\n"
     end
   end
@@ -394,8 +406,8 @@ defmodule Teiserver.Protocols.SpringOut do
     "#{username} is currently bound to #{ip}\n"
   end
 
-  defp do_reply(:user_id, {username, lobby_hash, springid}) do
-    "The ID for #{username} is #{lobby_hash} #{springid}\n"
+  defp do_reply(:user_id, {username, lobby_hash, userid}) do
+    "The ID for #{username} is #{lobby_hash} #{userid}\n"
   end
 
   defp do_reply(:change_email_request_denied, reason) do
@@ -435,21 +447,21 @@ defmodule Teiserver.Protocols.SpringOut do
   end
 
   defp do_reply(:sent_direct_message, {to_id, msg}) do
-    to_name = User.get_username(to_id)
+    to_name = Account.get_username_by_id(to_id)
     "SAYPRIVATE #{to_name} #{msg}\n"
   end
 
   defp do_reply(:direct_message, {from_id, messages, state_user}) when is_list(messages) do
-    from_user = User.get_user_by_id(from_id)
+    from_user = Account.get_user_by_id(from_id)
 
-    if from_id not in (state_user.ignored || []) or from_user.moderator == true do
-      from_name = User.get_username(from_id)
+    if not Account.does_a_ignore_b?(state_user.id, from_id) or
+         CacheUser.is_moderator?(from_user) == true do
+      from_name = Account.get_username_by_id(from_id)
 
       messages
-      |> Enum.map(fn msg ->
+      |> Enum.map_join("", fn msg ->
         "SAIDPRIVATE #{from_name} #{msg}\n"
       end)
-      |> Enum.join("")
     end
   end
 
@@ -459,11 +471,12 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:chat_message, {from_id, room_name, messages, state_user})
        when is_list(messages) do
-    from_user = User.get_user_by_id(from_id)
+    from_user = Account.get_user_by_id(from_id)
 
-    if from_id not in (state_user.ignored || []) or from_user.moderator == true or
-         User.is_bot?(from_user) == true do
-      from_name = User.get_username(from_id)
+    if not Account.does_a_ignore_b?(state_user.id, from_id) or
+         CacheUser.is_moderator?(from_user) == true or
+         CacheUser.is_bot?(from_user) == true do
+      from_name = Account.get_username_by_id(from_id)
 
       messages
       |> Enum.map_join("", fn msg ->
@@ -478,11 +491,12 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:chat_message_ex, {from_id, room_name, messages, state_user})
        when is_list(messages) do
-    from_user = User.get_user_by_id(from_id)
+    from_user = Account.get_user_by_id(from_id)
 
-    if from_id not in (state_user.ignored || []) or from_user.moderator == true or
-         User.is_bot?(from_user) == true do
-      from_name = User.get_username(from_id)
+    if not Account.does_a_ignore_b?(state_user.id, from_id) or
+         CacheUser.is_moderator?(from_user) == true or
+         CacheUser.is_bot?(from_user) == true do
+      from_name = Account.get_username_by_id(from_id)
 
       messages
       |> Enum.map_join("", fn msg ->
@@ -496,7 +510,7 @@ defmodule Teiserver.Protocols.SpringOut do
   end
 
   defp do_reply(:add_user_to_room, {userid, room_name}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "JOINED #{room_name} #{username}\n"
   end
 
@@ -512,27 +526,27 @@ defmodule Teiserver.Protocols.SpringOut do
   end
 
   defp do_reply(:remove_user_from_room, {userid, room_name}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "LEFT #{room_name} #{username}\n"
   end
 
   defp do_reply(:add_user_to_battle, {userid, lobby_id, nil}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "JOINEDBATTLE #{lobby_id} #{username}\n"
   end
 
   defp do_reply(:add_user_to_battle, {userid, lobby_id, script_password}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "JOINEDBATTLE #{lobby_id} #{username} #{script_password}\n"
   end
 
   defp do_reply(:remove_user_from_battle, {userid, lobby_id}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "LEFTBATTLE #{lobby_id} #{username}\n"
   end
 
   defp do_reply(:kick_user_from_battle, {userid, lobby_id}) do
-    username = User.get_username(userid)
+    username = Account.get_username_by_id(userid)
     "KICKFROMBATTLE #{lobby_id} #{username}\n"
   end
 
@@ -542,10 +556,8 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:battle_message, {sender_id, messages, _lobby_id, state_userid})
        when is_list(messages) do
-    user = User.get_user_by_id(state_userid)
-
-    if sender_id not in (user.ignored || []) do
-      username = User.get_username(sender_id)
+    if not Account.does_a_ignore_b?(state_userid, sender_id) do
+      username = Account.get_username_by_id(sender_id)
 
       messages
       |> Enum.map_join("", fn msg ->
@@ -560,10 +572,8 @@ defmodule Teiserver.Protocols.SpringOut do
 
   defp do_reply(:battle_message_ex, {sender_id, messages, _lobby_id, state_userid})
        when is_list(messages) do
-    user = User.get_user_by_id(state_userid)
-
-    if sender_id not in (user.ignored || []) do
-      username = User.get_username(sender_id)
+    if not Account.does_a_ignore_b?(state_userid, sender_id) do
+      username = Account.get_username_by_id(sender_id)
 
       messages
       |> Enum.map_join("", fn msg ->
@@ -606,8 +616,8 @@ defmodule Teiserver.Protocols.SpringOut do
 
   @spec do_leave_battle(map(), T.lobby_id()) :: map()
   def do_leave_battle(state, lobby_id) do
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby_id}")
-    PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby_id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby_id}")
     state
   end
 
@@ -617,11 +627,11 @@ defmodule Teiserver.Protocols.SpringOut do
 
     if lobby do
       Lobby.add_user_to_battle(state.userid, lobby.id, script_password)
-      PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby.id}")
-      PubSub.subscribe(Central.PubSub, "teiserver_lobby_updates:#{lobby.id}")
+      PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby.id}")
+      PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_updates:#{lobby.id}")
 
-      PubSub.unsubscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby.id}")
-      PubSub.subscribe(Central.PubSub, "teiserver_lobby_chat:#{lobby.id}")
+      PubSub.unsubscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby.id}")
+      PubSub.subscribe(Teiserver.PubSub, "teiserver_lobby_chat:#{lobby.id}")
 
       reply(:join_battle_success, lobby, nil, state)
       reply(:add_user_to_battle, {state.userid, lobby.id, script_password}, nil, state)
@@ -660,19 +670,14 @@ defmodule Teiserver.Protocols.SpringOut do
     end
   end
 
-  @spec do_optimised_login_accepted(map(), map()) :: map()
-  def do_optimised_login_accepted(state, user) do
-    do_login_accepted(state, user)
-    |> Map.put(:optimise_protocol, true)
-  end
-
-  @spec do_login_accepted(map(), map()) :: map()
-  def do_login_accepted(state, user) do
+  @spec do_login_accepted(map(), map(), atom) :: map()
+  def do_login_accepted(state, user, optimisation_level) do
     state =
       Map.merge(state, %{
         lobby: nil,
         lobby_hash: nil,
-        queued_userid: nil
+        queued_userid: nil,
+        protocol_optimisation: optimisation_level
       })
 
     reply(:login_accepted, user.name, nil, state)
@@ -696,7 +701,7 @@ defmodule Teiserver.Protocols.SpringOut do
     end)
 
     if not state.exempt_from_cmd_throttle do
-      :timer.sleep(Application.get_env(:central, Teiserver)[:post_login_delay])
+      :timer.sleep(Application.get_env(:teiserver, Teiserver)[:post_login_delay])
     end
 
     # Battle entry commands
@@ -738,30 +743,30 @@ defmodule Teiserver.Protocols.SpringOut do
 
     send(self(), {:action, {:login_end, nil}})
 
-    :ok = PubSub.subscribe(Central.PubSub, "client_inout")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "client_inout")
 
-    :ok = PubSub.subscribe(Central.PubSub, "legacy_all_client_updates")
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_client_messages:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "legacy_all_client_updates")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_client_messages:#{user.id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "account_user_relationships:#{user.id}")
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_global_user_updates")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_global_user_updates")
 
-    PubSub.unsubscribe(Central.PubSub, "legacy_user_updates:#{user.id}")
-    PubSub.subscribe(Central.PubSub, "legacy_user_updates:#{user.id}")
+    PubSub.unsubscribe(Teiserver.PubSub, "legacy_user_updates:#{user.id}")
+    PubSub.subscribe(Teiserver.PubSub, "legacy_user_updates:#{user.id}")
 
-    PubSub.unsubscribe(Central.PubSub, "teiserver_global_lobby_updates")
-    PubSub.subscribe(Central.PubSub, "teiserver_global_lobby_updates")
+    PubSub.unsubscribe(Teiserver.PubSub, "teiserver_global_lobby_updates")
+    PubSub.subscribe(Teiserver.PubSub, "teiserver_global_lobby_updates")
 
     Logger.metadata(request_id: "SpringTcpServer##{user.id}")
 
-    exempt_from_cmd_throttle = user.moderator == true or User.is_bot?(user) == true
+    exempt_from_cmd_throttle = CacheUser.is_moderator?(user) or CacheUser.is_bot?(user) == true
 
     %{
       state
       | user: user,
         username: user.name,
         userid: user.id,
-        exempt_from_cmd_throttle: exempt_from_cmd_throttle,
-        optimise_protocol: false
+        exempt_from_cmd_throttle: exempt_from_cmd_throttle
     }
   end
 
@@ -770,13 +775,13 @@ defmodule Teiserver.Protocols.SpringOut do
     room = Room.get_or_make_room(room_name, state.userid)
     Room.add_user_to_room(state.userid, room_name)
 
-    PubSub.unsubscribe(Central.PubSub, "room:#{room_name}")
-    :ok = PubSub.subscribe(Central.PubSub, "room:#{room_name}")
+    PubSub.unsubscribe(Teiserver.PubSub, "room:#{room_name}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "room:#{room_name}")
 
     reply(:join_success, room_name, nil, state)
     reply(:add_user_to_room, {state.userid, room_name}, nil, state)
 
-    author_name = User.get_username(room.author_id)
+    author_name = Account.get_username_by_id(room.author_id)
     reply(:channel_topic, {room_name, author_name}, nil, state)
 
     # Check for known users
@@ -816,7 +821,7 @@ defmodule Teiserver.Protocols.SpringOut do
       end)
 
     if not state.exempt_from_cmd_throttle do
-      :timer.sleep(Application.get_env(:central, Teiserver)[:spring_post_state_change_delay])
+      :timer.sleep(Application.get_env(:teiserver, Teiserver)[:spring_post_state_change_delay])
     end
 
     members =

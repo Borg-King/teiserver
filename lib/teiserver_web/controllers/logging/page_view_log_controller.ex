@@ -1,22 +1,22 @@
 defmodule TeiserverWeb.Logging.PageViewLogController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Logging
-  alias Central.Helpers.TimexHelper
-  import Central.Helpers.StringHelper, only: [get_hash_id: 1]
+  alias Teiserver.Helper.TimexHelper
+  import Teiserver.Helper.StringHelper, only: [get_hash_id: 1]
 
   plug :add_breadcrumb, name: 'Logging', url: '/logging'
   plug :add_breadcrumb, name: 'Page views', url: '/logging/page_views'
 
   plug(AssignPlug,
-    site_menu_active: "central_logging",
+    site_menu_active: "logging",
     sub_menu_active: "page_view"
   )
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Logging.PageViewLog,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def index(conn, params) do

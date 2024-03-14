@@ -1,8 +1,9 @@
 defmodule Teiserver.Coordinator.AutomodServer do
+  @moduledoc false
   use GenServer
   alias Teiserver.Config
   import Teiserver.Logging.Helpers, only: [add_audit_log: 4]
-  alias Teiserver.{Account, User, Moderation, Coordinator, Client}
+  alias Teiserver.{Account, CacheUser, Moderation, Coordinator, Client}
   alias Phoenix.PubSub
   require Logger
   alias Teiserver.Data.Types, as: T
@@ -27,7 +28,7 @@ defmodule Teiserver.Coordinator.AutomodServer do
 
   @spec do_start() :: :ok
   defp do_start() do
-    {:ok, _coordinator_pid} =
+    {:ok, _automod_pid} =
       DynamicSupervisor.start_child(Teiserver.Coordinator.DynamicSupervisor, {
         Teiserver.Coordinator.AutomodServer,
         name: Teiserver.Coordinator.AutomodServer, data: %{}
@@ -42,7 +43,8 @@ defmodule Teiserver.Coordinator.AutomodServer do
   end
 
   def handle_info(:begin, state) do
-    :ok = PubSub.subscribe(Central.PubSub, "client_inout")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "client_inout")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "telemetry_user_properties")
     coordinator_id = Coordinator.get_coordinator_userid()
 
     if coordinator_id != nil do
@@ -75,6 +77,34 @@ defmodule Teiserver.Coordinator.AutomodServer do
 
   def handle_info(%{channel: "client_inout"}, state), do: {:noreply, state}
 
+  def handle_info(%{channel: "telemetry_user_properties", event: :upserted_property} = msg, state) do
+    case msg.property_type_name do
+      "hardware:cpuinfo" ->
+        Account.merge_update_client(msg.userid, %{app_status: :accepted})
+
+        client = Account.get_client_by_id(msg.userid)
+
+        if client do
+          send(client.tcp_pid, {:put, :app_status, :accepted})
+        end
+
+      "hardware:macAddrHash" ->
+        Account.create_smurf_key(msg.userid, "chobby_mac_hash", msg.value)
+        Account.update_cache_user(msg.userid, %{chobby_mac_hash: msg.value})
+
+      "hardware:sysInfoHash" ->
+        Account.create_smurf_key(msg.userid, "chobby_sysinfo_hash", msg.value)
+        Account.update_cache_user(msg.userid, %{chobby_sysinfo_hash: msg.value})
+
+      _ ->
+        :ok
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(%{channel: "telemetry_user_properties"}, state), do: {:noreply, state}
+
   # Catchall handle_info
   def handle_info(msg, state) do
     Logger.error("AutoMod handle_info error. No handler for msg of #{Kernel.inspect(msg)}")
@@ -101,7 +131,7 @@ defmodule Teiserver.Coordinator.AutomodServer do
   # Internal functions
   @spec check_wrapper(T.userid()) :: String.t()
   defp check_wrapper(userid) do
-    case User.get_user_by_id(userid) do
+    case Account.get_user_by_id(userid) do
       nil ->
         "No user"
 
@@ -131,7 +161,7 @@ defmodule Teiserver.Coordinator.AutomodServer do
   end
 
   def do_check(user) do
-    if User.is_restricted?(user, ["Login"]) do
+    if CacheUser.is_restricted?(user, ["Login"]) do
       "Already banned"
     else
       smurf_keys =
@@ -159,35 +189,32 @@ defmodule Teiserver.Coordinator.AutomodServer do
   def enact_ban([], _), do: "No action"
 
   def enact_ban([ban | _], userid) do
-    Account.update_user_stat(userid, %{"autoban_id" => ban.id})
-
-    coordinator_user_id = Coordinator.get_coordinator_userid()
-
-    {:ok, action} =
-      Moderation.create_action(%{
-        target_id: userid,
-        reason: "Banned (Automod)",
-        restrictions: ["Login", "Permanently banned"],
-        score_modifier: 0,
-        hidden: true,
-        expires: Timex.now() |> Timex.shift(years: 1300)
-      })
-
-    Teiserver.Moderation.RefreshUserRestrictionsTask.refresh_user(action.target_id)
+    user = Account.get_user!(userid)
+    {:ok, _} = Account.server_update_user(user, %{"smurf_of_id" => ban.source_id})
 
     add_audit_log(
-      coordinator_user_id,
+      Coordinator.get_coordinator_userid(),
       "127.0.0.0",
       "Moderation:Ban enacted",
       %{
-        "action_id" => action.id,
         "target_user_id" => userid,
         "ban_id" => ban.id
       }
     )
 
-    Client.disconnect(userid, "Banned")
+    Client.kick_disconnect(userid, "Banned")
 
     "Banned user"
+  end
+
+  @spec get_automod_pid() :: pid() | nil
+  def get_automod_pid() do
+    case Horde.Registry.lookup(Teiserver.ServerRegistry, "AutomodServer") do
+      [{pid, _}] ->
+        pid
+
+      _ ->
+        nil
+    end
   end
 end

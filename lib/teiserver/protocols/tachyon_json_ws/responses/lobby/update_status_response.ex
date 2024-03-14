@@ -5,8 +5,10 @@ defmodule Teiserver.Tachyon.Responses.Lobby.UpdateStatusResponse do
 
   alias Teiserver.Data.Types, as: T
 
-  @spec generate({:error, String.t()} | T.lobby()) :: {T.tachyon_command(), T.tachyon_object()}
-  def generate(:ok) do
+  @spec generate() ::
+          {T.tachyon_command(), :success, T.tachyon_object()}
+          | {T.tachyon_command(), T.error_pair()}
+  def generate() do
     {"lobby/updateStatus/response", :success, %{}}
   end
 end

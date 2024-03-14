@@ -1,9 +1,9 @@
 defmodule TeiserverWeb.API.SpadsController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
   alias Teiserver.Config
   alias Teiserver.{Account, Coordinator, Battle}
   alias Teiserver.Battle.BalanceLib
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
   require Logger
 
   @spec get_rating(Plug.Conn.t(), map) :: Plug.Conn.t()
@@ -22,7 +22,7 @@ defmodule TeiserverWeb.API.SpadsController do
       }) do
     actual_type =
       case type do
-        "TeamFFA" -> "FFA"
+        "TeamFFA" -> "Team"
         v -> v
       end
 

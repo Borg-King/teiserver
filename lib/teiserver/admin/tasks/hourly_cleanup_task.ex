@@ -2,7 +2,7 @@ defmodule Teiserver.Admin.HourlyCleanupTask do
   @moduledoc false
   use Oban.Worker, queue: :cleanup
 
-  alias Central.Repo
+  alias Teiserver.Repo
 
   @impl Oban.Worker
   @spec perform(any) :: :ok
@@ -15,10 +15,9 @@ defmodule Teiserver.Admin.HourlyCleanupTask do
   end
 
   defp chat_log_cleanup() do
-    days = Application.get_env(:central, Teiserver)[:retention][:room_chat]
+    days = Application.get_env(:teiserver, Teiserver)[:retention][:room_chat]
 
-    before_timestamp =
-      Timex.shift(Timex.now(), days: -days)
+    before_timestamp = Timex.shift(Timex.now(), days: -days)
 
     query = """
           DELETE FROM teiserver_room_messages
@@ -27,10 +26,9 @@ defmodule Teiserver.Admin.HourlyCleanupTask do
 
     Ecto.Adapters.SQL.query!(Repo, query, [before_timestamp])
 
-    days = Application.get_env(:central, Teiserver)[:retention][:lobby_chat]
+    days = Application.get_env(:teiserver, Teiserver)[:retention][:lobby_chat]
 
-    before_timestamp =
-      Timex.shift(Timex.now(), days: -days)
+    before_timestamp = Timex.shift(Timex.now(), days: -days)
 
     query = """
           DELETE FROM teiserver_lobby_messages

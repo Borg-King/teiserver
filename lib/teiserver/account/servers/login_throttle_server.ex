@@ -11,7 +11,7 @@ defmodule Teiserver.Account.LoginThrottleServer do
   """
   use GenServer
   require Logger
-  alias Teiserver.{Account, User}
+  alias Teiserver.{Account, CacheUser}
   alias Teiserver.Config
   alias Teiserver.Data.Types, as: T
   alias Phoenix.PubSub
@@ -115,7 +115,8 @@ defmodule Teiserver.Account.LoginThrottleServer do
 
   @impl true
   def handle_call(:queue_size, _from, state) do
-    result = @queues
+    result =
+      @queues
       |> Enum.map(fn q ->
         String.to_atom("#{q}_queue")
       end)
@@ -148,6 +149,8 @@ defmodule Teiserver.Account.LoginThrottleServer do
     # Strip out invalid heartbeats
     heartbeat_max_age = System.system_time(:millisecond) - @heartbeat_expiry
 
+    # Dropped users are users who've not updated their heartbeat for a bit
+    # we assume they've left the queue
     dropped_users =
       state.heartbeats
       |> Map.filter(fn {_key, {_pid, last_time}} ->
@@ -192,7 +195,7 @@ defmodule Teiserver.Account.LoginThrottleServer do
     }
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_liveview_login_throttle",
       %{
         channel: "teiserver_liveview_login_throttle",
@@ -232,8 +235,16 @@ defmodule Teiserver.Account.LoginThrottleServer do
     {:noreply, new_state}
   end
 
-  def handle_info({:set_tick_period, new_period}, state) do
+  def handle_info(:disable_tick_timer, state) do
     :timer.cancel(state.tick_timer_ref)
+    {:noreply, %{state | tick_timer_ref: nil}}
+  end
+
+  def handle_info({:set_tick_period, new_period}, state) do
+    if state.tick_timer_ref do
+      :timer.cancel(state.tick_timer_ref)
+    end
+
     tick_timer_ref = :timer.send_interval(new_period, :tick)
 
     {:noreply, %{state | tick_timer_ref: tick_timer_ref}}
@@ -241,8 +252,8 @@ defmodule Teiserver.Account.LoginThrottleServer do
 
   def handle_info(:startup, _) do
     tick_timer_ref = :timer.send_interval(@default_tick_period, :tick)
-    telemetry_data = Central.cache_get(:application_temp_cache, :telemetry_data) || %{}
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_telemetry")
+    telemetry_data = Teiserver.cache_get(:application_temp_cache, :telemetry_data) || %{}
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_telemetry")
 
     state =
       %{
@@ -352,7 +363,7 @@ defmodule Teiserver.Account.LoginThrottleServer do
         new_arrival_times = Map.drop(state.arrival_times, released_users)
 
         PubSub.broadcast(
-          Central.PubSub,
+          Teiserver.PubSub,
           "teiserver_liveview_login_throttle",
           %{
             channel: "teiserver_liveview_login_throttle",
@@ -389,7 +400,7 @@ defmodule Teiserver.Account.LoginThrottleServer do
     new_remaining_capacity = remaining_capacity - 1
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_liveview_login_throttle",
       %{
         channel: "teiserver_liveview_login_throttle",
@@ -411,13 +422,13 @@ defmodule Teiserver.Account.LoginThrottleServer do
     user = Account.get_user_by_id(userid)
 
     cond do
-      User.is_bot?(user) -> :instant
-      User.has_any_role?(user, ["Server"]) -> :instant
-      User.has_any_role?(user, ["Moderator"]) -> :moderator
-      User.has_any_role?(user, ["Core"]) -> :core
-      User.has_any_role?(user, ["Contributor"]) -> :contributor
-      User.has_any_role?(user, ["Overwatch", "Reviewer"]) -> :volunteer
-      User.has_any_role?(user, ["VIP"]) -> :vip
+      CacheUser.is_bot?(user) -> :instant
+      CacheUser.has_any_role?(user, ["Server"]) -> :instant
+      CacheUser.is_moderator?(user) -> :moderator
+      CacheUser.has_any_role?(user, ["Core"]) -> :core
+      CacheUser.has_any_role?(user, ["Contributor"]) -> :contributor
+      CacheUser.has_any_role?(user, ["Overwatch", "Reviewer"]) -> :volunteer
+      CacheUser.has_any_role?(user, ["VIP", "BAR+"]) -> :vip
       user.behaviour_score < 5000 -> :toxic
       true -> :standard
     end
@@ -435,7 +446,7 @@ defmodule Teiserver.Account.LoginThrottleServer do
     remaining_capacity = total_limit - client_count
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_liveview_login_throttle",
       %{
         channel: "teiserver_liveview_login_throttle",

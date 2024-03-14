@@ -1,7 +1,7 @@
 defmodule Teiserver.Account.LoginThrottleServerTest do
   @moduledoc false
 
-  use Central.DataCase, async: false
+  use Teiserver.DataCase, async: false
   alias Teiserver.Config
   alias Teiserver.Account
   alias Teiserver.Account.LoginThrottleServer
@@ -12,13 +12,20 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
       new_user: 0
     ]
 
+  @sleep_time 500
+
+  # For reasons unknown this test often results in the wrong number of people
+  # being released at various stages. I have no idea why (but it does work in prod)
   test "multiple queues" do
+    pid = LoginThrottleServer.get_login_throttle_server_pid()
     LoginThrottleServer.set_value(:releases_per_tick, 1)
-    LoginThrottleServer.set_value(:set_tick_period, 60_000)
+    # LoginThrottleServer.set_value(:set_tick_period, 60_000)
+    send(pid, :disable_tick_timer)
 
     Teiserver.TeiserverConfigs.teiserver_configs()
-    pid = LoginThrottleServer.get_login_throttle_server_pid()
     Config.update_site_config("system.User limit", 10)
+
+    throttle_listener = PubsubListener.new_listener(["teiserver_liveview_login_throttle"])
 
     bot = new_user()
     Account.update_cache_user(bot.id, %{roles: ["Bot"]})
@@ -44,6 +51,8 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
     Account.update_cache_user(toxic.id, %{behaviour_score: 1})
     toxic_listener = PubsubListener.new_listener([])
 
+    assert PubsubListener.get(throttle_listener) == []
+
     send(pid, %{
       channel: "teiserver_telemetry",
       event: :data,
@@ -53,6 +62,9 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
         }
       }
     })
+
+    send(pid, :tick)
+    :timer.sleep(@sleep_time)
 
     # Bots should get in regardless of capacity, no messages for the listener
     r = LoginThrottleServer.attempt_login(bot_listener, bot.id)
@@ -107,7 +119,7 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
     send(pid, :tick)
 
     # Give it a chance to dequeue
-    :timer.sleep(500)
+    :timer.sleep(@sleep_time)
 
     assert PubsubListener.get(moderator_listener) == [{:login_accepted, moderator.id}]
     assert PubsubListener.get(contributor_listener) == []
@@ -124,7 +136,7 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
 
     assert Enum.count(state.recent_logins) == 2
 
-    :timer.sleep(500)
+    :timer.sleep(@sleep_time)
 
     # Ensure no more updates in the meantime, should only happen when we tell it to tick
     assert PubsubListener.get(moderator_listener) == []
@@ -132,6 +144,9 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
     assert PubsubListener.get(vip_listener) == []
     assert PubsubListener.get(standard_listener) == []
     assert PubsubListener.get(toxic_listener) == []
+
+    # Flush the throttle messages
+    PubsubListener.get(throttle_listener)
 
     # Now approve the rest of them
     # the toxic one will have to wait a bit longer though
@@ -148,9 +163,20 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
     state = :sys.get_state(pid)
     assert state.remaining_capacity == 6
 
+    throttle_messages = PubsubListener.get(throttle_listener)
+
+    assert throttle_messages == [
+             %{
+               channel: "teiserver_liveview_login_throttle",
+               event: :updated_capacity,
+               remaining_capacity: 6
+             }
+           ]
+
     # Dequeue the next more
     send(pid, :tick)
-    :timer.sleep(500)
+    :timer.sleep(@sleep_time)
+
     assert PubsubListener.get(moderator_listener) == []
     assert PubsubListener.get(contributor_listener) == [{:login_accepted, contributor.id}]
     assert PubsubListener.get(vip_listener) == []
@@ -160,7 +186,7 @@ defmodule Teiserver.Account.LoginThrottleServerTest do
     send(pid, :tick)
 
     # Give it a chance to dequeue
-    :timer.sleep(500)
+    :timer.sleep(@sleep_time)
 
     assert PubsubListener.get(moderator_listener) == []
     assert PubsubListener.get(contributor_listener) == [{:login_accepted, contributor.id}]

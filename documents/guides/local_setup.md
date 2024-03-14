@@ -6,7 +6,7 @@ You will need to install:
 - [Elixir/Erlang installed](https://elixir-lang.org/install.html).
 - [Postresql](https://www.postgresql.org/download).
 
-Make sure that Elixir is in correct version (currently using 1.13.2). You can find required version [here](https://github.com/beyond-all-reason/teiserver/blob/master/mix.exs#L8).
+Make sure that Elixir is in correct version (I'm currently using 1.14). You can find required version [here](https://github.com/beyond-all-reason/teiserver/blob/master/mix.exs#L8).
 You can use [asdf](https://github.com/asdf-vm/asdf) to install correct version.
 
 ### Clone repo
@@ -64,12 +64,6 @@ openssl req -x509 -out localhost.crt -keyout localhost.key \
 cd ../..
 ```
 
-#### Migrations
-Run the following from your directory to migrate the database. Further migrations are run at startup but for the first run you want to have run them manually.
-```bash
-mix ecto.migrate
-```
-
 ### SASS
 We use sass for our css generation and you'll need to run this to get it started.
 ```bash
@@ -111,11 +105,10 @@ If you want to do things like have a discord bot in development you don't want t
 ```elixir
 import Config
 
-config :central, Teiserver,
-  enable_discord_bridge: true,
-  enable_agent_mode: true
+config :teiserver, Teiserver,
+  enable_discord_bridge: true
 
-config :central, DiscordBridge,
+config :teiserver, DiscordBridgeBot,
   token: "------",
   bot_name: "Teiserver Bridge DEV",
   bridges: [
@@ -126,7 +119,7 @@ config :central, DiscordBridge,
   ]
 
 # Comment the below block to enable background jobs to take place locally
-config :central, Oban,
+config :teiserver, Oban,
   queues: false,
   crontab: false
 
@@ -143,13 +136,11 @@ Will generate a large amount of fake data and setup a root account for you. The 
 ### Resetting your user password
 When running locally it's likely you won't want to connect the server to an email account, as such password resets need to be done a little differently.
 
-I suggest turning off agent mode in `config/dev.secret.exs` with `enable_agent_mode: false` as while agent mode is running you will be getting a lot of terminal output which can make it harder to perform.
-
 Run your server with `iex -S mix phx.server` and then once it has started up use the following code to update your password.
 
 ```elixir
-user = Central.Account.get_user_by_email("root@localhost")
-Central.Account.update_user(user, %{"password" => "your password here"})
+user = Teiserver.Account.get_user_by_email("root@localhost")
+Teiserver.Account.update_user(user, %{"password" => "your password here"})
 ```
 
 ### Main 3rd party dependencies

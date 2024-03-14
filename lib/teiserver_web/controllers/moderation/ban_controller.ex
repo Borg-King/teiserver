@@ -1,16 +1,16 @@
 defmodule TeiserverWeb.Moderation.BanController do
   @moduledoc false
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Logging
   alias Teiserver.{Account, Moderation}
-  alias Teiserver.Moderation.{Ban, BanLib}
-  import Central.Helpers.StringHelper, only: [get_hash_id: 1]
+  alias Teiserver.Moderation.{Ban, BanLib, ActionLib}
+  import Teiserver.Helper.StringHelper, only: [get_hash_id: 1]
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Moderation.Ban,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "moderation",
@@ -91,14 +91,20 @@ defmodule TeiserverWeb.Moderation.BanController do
           nil
       end
 
-    case user do
-      nil ->
+    existing_ban = Moderation.get_ban(nil, search: [source_id: user.id])
+
+    cond do
+      user == nil ->
         conn
         |> add_breadcrumb(name: "New ban", url: conn.request_path)
         |> put_flash(:warning, "Unable to find that user")
         |> render("new_select.html")
 
-      user ->
+      existing_ban != nil ->
+        conn
+        |> redirect(to: Routes.moderation_ban_path(conn, :show, existing_ban.id))
+
+      true ->
         matching_users =
           Account.smurf_search(user)
           |> Enum.map(fn {_type, users} -> users end)
@@ -107,10 +113,10 @@ defmodule TeiserverWeb.Moderation.BanController do
           |> Enum.uniq()
           |> Enum.map(fn userid -> Account.get_user_by_id(userid) end)
           |> Enum.reject(fn user ->
-            Teiserver.User.is_restricted?(user, ["Login"])
+            Teiserver.CacheUser.is_restricted?(user, ["Login"])
           end)
 
-        all_keys =
+        all_user_keys =
           Account.list_smurf_keys(
             search: [
               user_id: user.id
@@ -141,12 +147,13 @@ defmodule TeiserverWeb.Moderation.BanController do
         changeset = Moderation.change_ban(%Ban{source_id: user.id})
 
         conn
+        |> assign(:extra_values, [])
         |> assign(:key_types, key_types)
         |> assign(:matching_users, matching_users)
         |> assign(:changeset, changeset)
         |> assign(:user, user)
         |> assign(:user_stats, user_stats)
-        |> assign(:all_keys, all_keys)
+        |> assign(:all_user_keys, all_user_keys)
         |> add_breadcrumb(name: "New ban for #{user.name}", url: conn.request_path)
         |> render("new_with_user.html")
     end
@@ -167,20 +174,23 @@ defmodule TeiserverWeb.Moderation.BanController do
 
     ban_params =
       Map.merge(ban_params, %{
-        "added_by_id" => conn.current_user.id,
+        "added_by_id" => conn.assigns.current_user.id,
         "key_values" => key_values
       })
 
     case Moderation.create_ban(ban_params) do
       {:ok, ban} ->
         # Now ban the user themselves
-        Moderation.create_action(%{
-          target_id: ban.source_id,
-          reason: ban.reason,
-          restrictions: ["Login"],
-          score_modifier: 0,
-          expires: Timex.now() |> Timex.shift(years: 1000)
-        })
+        {:ok, action} =
+          Moderation.create_action(%{
+            target_id: ban.source_id,
+            reason: ban.reason,
+            restrictions: ["Login"],
+            score_modifier: 0,
+            expires: Timex.now() |> Timex.shift(years: 1000)
+          })
+
+        ActionLib.maybe_create_discord_post(action)
 
         Teiserver.Moderation.RefreshUserRestrictionsTask.refresh_user(ban.source_id)
 
@@ -199,10 +209,10 @@ defmodule TeiserverWeb.Moderation.BanController do
           |> Enum.uniq()
           |> Enum.map(fn userid -> Account.get_user_by_id(userid) end)
           |> Enum.reject(fn user ->
-            Teiserver.User.is_restricted?(user, ["Login"])
+            Teiserver.CacheUser.is_restricted?(user, ["Login"])
           end)
 
-        all_keys =
+        all_user_keys =
           Account.list_smurf_keys(
             search: [
               user_id: user.id
@@ -236,7 +246,7 @@ defmodule TeiserverWeb.Moderation.BanController do
         |> assign(:changeset, changeset)
         |> assign(:user, user)
         |> assign(:user_stats, user_stats)
-        |> assign(:all_keys, all_keys)
+        |> assign(:all_user_keys, all_user_keys)
         |> add_breadcrumb(name: "New ban", url: conn.request_path)
         |> render("new_with_user.html")
     end
@@ -244,14 +254,36 @@ defmodule TeiserverWeb.Moderation.BanController do
 
   @spec edit(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def edit(conn, %{"id" => id}) do
-    ban = Moderation.get_ban!(id)
+    ban = Moderation.get_ban!(id, preload: [:source])
 
     changeset = Moderation.change_ban(ban)
 
+    all_user_keys =
+      Account.list_smurf_keys(
+        search: [
+          user_id: ban.source_id
+        ],
+        limit: :infinity,
+        preload: [:type],
+        order_by: "Newest first"
+      )
+
+    user_key_values =
+      all_user_keys
+      |> Enum.map(fn k -> k.value end)
+
+    extra_values =
+      ban.key_values
+      |> Enum.reject(fn v ->
+        Enum.member?(user_key_values, v)
+      end)
+
     conn
+    |> assign(:extra_values, extra_values)
     |> assign(:ban, ban)
+    |> assign(:all_user_keys, all_user_keys)
     |> assign(:changeset, changeset)
-    |> add_breadcrumb(name: "Edit: #{ban.name}", url: conn.request_path)
+    |> add_breadcrumb(name: "Edit: #{ban.source.name}", url: conn.request_path)
     |> render("edit.html")
   end
 
@@ -259,11 +291,27 @@ defmodule TeiserverWeb.Moderation.BanController do
   def update(conn, %{"id" => id, "ban" => ban_params}) do
     ban = Moderation.get_ban!(id)
 
+    key_values =
+      ban_params["key_values"]
+      |> Enum.reject(fn r -> r == "false" end)
+
+    extra_values =
+      ban_params["extra_values"]
+      |> String.split("\n")
+      |> Enum.reject(fn v ->
+        v == "" or v == nil
+      end)
+
+    ban_params =
+      Map.merge(ban_params, %{
+        "key_values" => Enum.uniq(key_values ++ extra_values)
+      })
+
     case Moderation.update_ban(ban, ban_params) do
       {:ok, _ban} ->
         conn
         |> put_flash(:info, "Ban updated successfully.")
-        |> redirect(to: Routes.moderation_ban_path(conn, :index))
+        |> redirect(to: ~p"/moderation/ban/#{ban.id}")
 
       {:error, %Ecto.Changeset{} = changeset} ->
         conn

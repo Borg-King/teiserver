@@ -73,7 +73,7 @@ spectators =
         <% extra = "#{@lobby.name} - #{@lobby.map_name}" %>
         <%= if @lobby.in_progress do %>
           <h4>
-            Match in progress - <%= Central.Helpers.TimexHelper.duration_to_str_short(
+            Match in progress - <%= Teiserver.Helper.TimexHelper.duration_to_str_short(
               System.system_time(:second) - (@lobby.started_at || 1_652_282_031)
             ) %> - <%= extra %>
           </h4>
@@ -156,8 +156,8 @@ spectators =
 
               party_colour = @parties[client.party_id]
 
-              friend = Enum.member?(@server_user.friends, client)
-              ignored = Enum.member?(@server_user.ignored, client) %>
+              friend = Enum.member?(@friends, client.userid)
+              ignored = Enum.member?(@ignored, client.userid) %>
               <%= if user do %>
                 <tr id={"user-row-#{user.id}"}>
                   <td width="100">
@@ -178,9 +178,9 @@ spectators =
                     <td width="50">&nbsp;</td>
                   <% end %>
 
-                  <td><%= Central.Helpers.NumberHelper.round(rating_value, 2) %></td>
+                  <td><%= Teiserver.Helper.NumberHelper.round(rating_value, 2) %></td>
                   <%= if @moderator do %>
-                    <td><%= Central.Helpers.NumberHelper.round(uncertainty, 2) %></td>
+                    <td><%= Teiserver.Helper.NumberHelper.round(uncertainty, 2) %></td>
 
                     <td><%= @stats[user.id]["win_rate.team"] %></td>
                     <td><%= @stats[user.id]["recent_count.team"] %></td>
@@ -240,8 +240,8 @@ spectators =
               <% user = @users[client.userid]
               {rating_value, uncertainty} = @ratings[client.userid]
 
-              friend = Enum.member?(@server_user.friends, client)
-              ignored = Enum.member?(@server_user.ignored, client) %>
+              friend = Enum.member?(@friends, client.userid)
+              ignored = Enum.member?(@ignored, client.userid) %>
               <%= if user do %>
                 <tr id={"user-row-#{user.id}"}>
                   <td width="100">
@@ -254,9 +254,9 @@ spectators =
                   </td>
                   <td><%= user.name %></td>
 
-                  <td><%= Central.Helpers.NumberHelper.round(rating_value, 2) %></td>
+                  <td><%= Teiserver.Helper.NumberHelper.round(rating_value, 2) %></td>
                   <%= if @moderator do %>
-                    <td><%= Central.Helpers.NumberHelper.round(uncertainty, 2) %></td>
+                    <td><%= Teiserver.Helper.NumberHelper.round(uncertainty, 2) %></td>
                   <% end %>
 
                   <%= if @moderator do %>
@@ -282,7 +282,7 @@ spectators =
         <br />
 
         <span>
-          <%= live_redirect("Back", to: ~p"/teiserver/battle/lobbies", class: "btn btn-#{bsname}") %>
+          <%= live_redirect("Back", to: ~p"/battle/lobbies", class: "btn btn-#{bsname}") %>
         </span>
 
         <%= if @admin_dev do %>

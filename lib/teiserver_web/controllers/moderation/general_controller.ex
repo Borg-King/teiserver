@@ -1,6 +1,6 @@
 defmodule TeiserverWeb.Moderation.GeneralController do
   @moduledoc false
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   plug :add_breadcrumb, name: 'Moderation', url: '/moderation'
 
@@ -12,7 +12,7 @@ defmodule TeiserverWeb.Moderation.GeneralController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Moderation.Report,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def index(conn, _params) do

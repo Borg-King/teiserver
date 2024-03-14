@@ -1,7 +1,7 @@
 defmodule Teiserver.Game.QueueWaitServer do
   @moduledoc """
   This is the server used to match players for a battle before passing them off
-  to a QueueMatchServer.
+  to a QueueRoomServer.
   """
 
   use GenServer
@@ -49,7 +49,7 @@ defmodule Teiserver.Game.QueueWaitServer do
           end
 
           PubSub.broadcast(
-            Central.PubSub,
+            Teiserver.PubSub,
             "teiserver_queue:#{state.queue_id}",
             %{
               channel: "teiserver_queue:#{state.queue_id}",
@@ -64,7 +64,7 @@ defmodule Teiserver.Game.QueueWaitServer do
             Account.add_client_to_queue(userid, state.queue_id)
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "teiserver_client_messages:#{userid}",
               %{
                 channel: "teiserver_client_messages:#{userid}",
@@ -88,7 +88,7 @@ defmodule Teiserver.Game.QueueWaitServer do
           new_state = remove_group(group_id, state)
 
           PubSub.broadcast(
-            Central.PubSub,
+            Teiserver.PubSub,
             "teiserver_queue:#{state.queue_id}",
             %{
               channel: "teiserver_queue:#{state.queue_id}",
@@ -104,7 +104,7 @@ defmodule Teiserver.Game.QueueWaitServer do
             Account.remove_client_from_queue(userid, state.queue_id)
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "teiserver_client_messages:#{userid}",
               %{
                 channel: "teiserver_client_messages:#{userid}",
@@ -174,7 +174,7 @@ defmodule Teiserver.Game.QueueWaitServer do
           }
 
           PubSub.broadcast(
-            Central.PubSub,
+            Teiserver.PubSub,
             "teiserver_queue:#{state.queue_id}",
             %{
               channel: "teiserver_queue:#{state.queue_id}",
@@ -189,7 +189,7 @@ defmodule Teiserver.Game.QueueWaitServer do
             Account.add_client_to_queue(userid, state.queue_id)
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "teiserver_client_messages:#{userid}",
               %{
                 channel: "teiserver_client_messages:#{userid}",
@@ -235,7 +235,12 @@ defmodule Teiserver.Game.QueueWaitServer do
   end
 
   def handle_info({:refresh_from_db, db_queue}, state) do
-    update_state_from_db(state, db_queue)
+    new_state = update_state_from_db(state, db_queue)
+
+    :timer.cancel(state.tick_timer_ref)
+    tick_timer_ref = :timer.send_interval(new_state.tick_interval, :tick)
+
+    {:noreply, %{new_state | tick_timer_ref: tick_timer_ref}}
   end
 
   def handle_info(:increase_range, %{range_counter: range_counter} = state) do
@@ -292,7 +297,7 @@ defmodule Teiserver.Game.QueueWaitServer do
     mean_wait_time = calculate_mean_wait_time(state)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_all_queues",
       %{
         channel: "teiserver_all_queues",
@@ -304,7 +309,7 @@ defmodule Teiserver.Game.QueueWaitServer do
     )
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_queue:#{state.queue_id}",
       %{
         channel: "teiserver_queue:#{state.queue_id}",
@@ -319,7 +324,6 @@ defmodule Teiserver.Game.QueueWaitServer do
   end
 
   def handle_info(:tick, %{skip: true} = state) do
-    :timer.send_after(state.tick_interval, :tick)
     {:noreply, state}
   end
 
@@ -350,7 +354,6 @@ defmodule Teiserver.Game.QueueWaitServer do
           }
       end
 
-    :timer.send_after(state.tick_interval, :tick)
     {:noreply, new_state}
   end
 
@@ -382,7 +385,7 @@ defmodule Teiserver.Game.QueueWaitServer do
   defp select_groups_for_balance(state, group_list, bucket_key) do
     # We just need to find N teams of S people, then we balance it
     # largest groups first, we don't care about which team
-    # they are on, that will be handled by the MatchServer
+    # they are on, that will be handled by the RoomServer
 
     # First we sort the group list, should be biggest groups first followed
     # by the groups closest to the correct bucket
@@ -690,7 +693,7 @@ defmodule Teiserver.Game.QueueWaitServer do
 
     Process.send(self(), :increase_range, [])
 
-    :ok = PubSub.subscribe(Central.PubSub, "teiserver_global_matchmaking")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "teiserver_global_matchmaking")
     Logger.metadata(request_id: "QueueWaitServer##{opts.queue.id}")
 
     # Update the queue pids cache to point to this process
@@ -723,9 +726,12 @@ defmodule Teiserver.Game.QueueWaitServer do
         },
         opts.queue
       )
+      |> Map.merge(%{
+        tick_timer_ref: nil
+      })
 
-    send(self(), :tick)
+    tick_timer_ref = :timer.send_interval(state.tick_interval, :tick)
 
-    {:ok, state}
+    {:ok, %{state | tick_timer_ref: tick_timer_ref}}
   end
 end

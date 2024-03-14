@@ -1,205 +1,78 @@
 defmodule Teiserver.Account do
+  @moduledoc false
   import Ecto.Query, warn: false
-  alias Central.Repo
+  alias Teiserver.Repo
   require Logger
   alias Teiserver.Data.Types, as: T
+  alias Phoenix.PubSub
+  alias Teiserver.Helper.QueryHelpers
 
-  # Mostly a wrapper around Central.Account
-  alias Central.Account.User
-  alias Teiserver.Account.{UserLib}
-  alias Central.Helpers.QueryHelpers
+  alias Teiserver.Account.UserLib
 
-  @doc """
-  Returns the list of user.
+  @spec icon :: String.t()
+  def icon, do: "fa-duotone fa-user-alt"
 
-  ## Examples
+  @spec list_users() :: [User]
+  defdelegate list_users(), to: UserLib
 
-      iex> list_user()
-      [%User{}, ...]
+  @spec list_users(list) :: [User]
+  defdelegate list_users(args), to: UserLib
 
-  """
-  def list_users(args \\ []) do
-    UserLib.get_user()
-    |> UserLib.search(args[:search])
-    |> UserLib.preload(args[:joins])
-    |> UserLib.order_by(args[:order_by])
-    |> QueryHelpers.limit_query(args[:limit] || 50)
-    |> QueryHelpers.select(args[:select])
-    |> Repo.all()
-  end
+  @spec get_user!(non_neg_integer()) :: User.t()
+  defdelegate get_user!(user_id), to: UserLib
 
-  @doc """
-  Gets a single user.
+  @spec get_user!(non_neg_integer(), list) :: User.t() | nil
+  defdelegate get_user!(user_id, args), to: UserLib
 
-  Raises `Ecto.NoResultsError` if the User does not exist.
+  @spec get_user(non_neg_integer()) :: User.t() | nil
+  defdelegate get_user(user_id), to: UserLib
 
-  ## Examples
+  @spec get_user(non_neg_integer(), list) :: User.t() | nil
+  defdelegate get_user(user_id, args), to: UserLib
 
-      iex> get_user!(123)
-      %User{}
+  @spec create_user() :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate create_user(), to: UserLib
 
-      iex> get_user!(456)
-      ** (Ecto.NoResultsError)
+  @spec create_user(map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate create_user(attrs), to: UserLib
 
-  """
-  def get_user!(id, args \\ []) do
-    UserLib.get_user()
-    |> UserLib.search(%{id: id})
-    |> UserLib.search(args[:search])
-    |> UserLib.preload(args[:joins])
-    |> Repo.one!()
-  end
+  @spec script_create_user(map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate script_create_user(attrs), to: UserLib
 
-  def get_user(id, args \\ []) do
-    UserLib.get_user()
-    |> UserLib.search(%{id: id})
-    |> UserLib.search(args[:search])
-    |> UserLib.preload(args[:joins])
-    |> Repo.one()
-  end
+  @spec update_user(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate update_user(user, attrs), to: UserLib
 
-  @doc """
-  Creates a user.
+  @spec update_user_password(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate update_user_password(user, attrs), to: UserLib
 
-  ## Examples
+  @spec update_user_user_form(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate update_user_user_form(user, attrs), to: UserLib
 
-      iex> create_user(%{field: value})
-      {:ok, %User{}}
+  @spec server_limited_update_user(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate server_limited_update_user(user, attrs), to: UserLib
 
-      iex> create_user(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
+  @spec server_update_user(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate server_update_user(user, attrs), to: UserLib
 
-  """
-  def create_user(attrs \\ %{}) do
-    %User{}
-    |> User.changeset(attrs)
-    |> Repo.insert()
-    |> Central.Account.broadcast_create_user()
-  end
+  @spec script_update_user(User, map) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate script_update_user(user, attrs), to: UserLib
 
-  def script_create_user(attrs \\ %{}) do
-    %User{}
-    |> User.changeset(attrs, :script)
-    |> Repo.insert()
-    |> Central.Account.broadcast_create_user()
-  end
+  @spec delete_user(User) :: {:ok, User} | {:error, Ecto.Changeset}
+  defdelegate delete_user(user), to: UserLib
 
-  @doc """
-  Updates a user.
+  @spec change_user(User) :: Ecto.Changeset
+  defdelegate change_user(user), to: UserLib
 
-  ## Examples
-
-      iex> update_user(user, %{field: new_value})
-      {:ok, %User{}}
-
-      iex> update_user(user, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_user(%User{} = user, attrs) do
-    Central.Account.recache_user(user.id)
-
-    user
-    |> User.changeset(attrs, :limited_with_data)
-    |> Repo.update()
-    |> Central.Account.broadcast_update_user()
-  end
-
-  def server_update_user(%User{} = user, attrs) do
-    Central.Account.recache_user(user.id)
-
-    user
-    |> User.changeset(attrs)
-    |> Repo.update()
-    |> Central.Account.broadcast_update_user()
-  end
-
-  def script_update_user(%User{} = user, attrs) do
-    Central.Account.recache_user(user.id)
-
-    user
-    |> User.changeset(attrs, :script)
-    |> Repo.update()
-    |> Central.Account.broadcast_update_user()
-  end
-
-  @doc """
-  Deletes a User.
-
-  ## Examples
-
-      iex> delete_user(user)
-      {:ok, %User{}}
-
-      iex> delete_user(user)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_user(%User{} = user) do
-    Repo.delete(user)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking user changes.
-
-  ## Examples
-
-      iex> change_user(user)
-      %Ecto.Changeset{source: %User{}}
-
-  """
-  def change_user(%User{} = user) do
-    User.changeset(user, %{})
-  end
-
-  def user_as_json(users) when is_list(users) do
-    users
-    |> Enum.map(&user_as_json/1)
-  end
-
-  def user_as_json(user) do
-    %{
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      icon: user.icon,
-      colour: user.colour,
-      html_label: "#{user.name}",
-      html_value: "##{user.id}, #{user.name}"
-    }
-  end
-
-  @spec smurf_search(User.t()) :: [{{String.t(), String.t()}, [SmurfKey.t()]}]
-  def smurf_search(user) do
-    values =
-      list_smurf_keys(
-        search: [
-          user_id: user.id
-        ],
-        limit: :infinity,
-        select: [:value]
-      )
-      |> Enum.map(fn %{value: value} -> value end)
-
-    list_smurf_keys(
-      search: [
-        value_in: values,
-        not_user_id: user.id
-      ],
-      preload: [:user, :type],
-      limit: :infinity
-    )
-    |> Enum.group_by(fn sk -> {sk.type.name, sk.value} end)
-    |> Enum.sort_by(fn {key, _value} -> key end, &<=/2)
-  end
+  @spec change_user(User, map) :: Ecto.Changeset
+  defdelegate change_user(user, attrs), to: UserLib
 
   @spec spring_auth_check(Plug.Conn.t(), User.t(), String.t()) ::
           {:ok, User.t()} | {:error, String.t()}
   def spring_auth_check(conn, user, plain_text_password) do
     tei_user = get_user_by_id(user.id)
-    md5_password = Teiserver.User.spring_md5_password(plain_text_password)
+    md5_password = Teiserver.CacheUser.spring_md5_password(plain_text_password)
 
-    if Teiserver.User.test_password(md5_password, tei_user.password_hash) do
+    if Teiserver.CacheUser.test_password(md5_password, tei_user.password_hash) do
       update_user(user, %{password: plain_text_password})
 
       {:ok, user}
@@ -227,7 +100,7 @@ defmodule Teiserver.Account do
     UserStatLib.query_user_stats()
     |> UserStatLib.search(%{user_id: id})
     |> UserStatLib.search(args[:search])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -266,7 +139,7 @@ defmodule Teiserver.Account do
 
   @spec get_user_stat_data(integer()) :: Map.t()
   def get_user_stat_data(userid) do
-    Central.cache_get_or_store(:teiserver_user_stat_cache, userid, fn ->
+    Teiserver.cache_get_or_store(:teiserver_user_stat_cache, userid, fn ->
       case get_user_stat(userid) do
         nil ->
           %{}
@@ -304,7 +177,7 @@ defmodule Teiserver.Account do
         create_user_stat(%{user_id: userid, data: data})
 
       user_stat ->
-        Central.cache_delete(:teiserver_user_stat_cache, userid)
+        Teiserver.cache_delete(:teiserver_user_stat_cache, userid)
         new_data = Map.merge(user_stat.data, data)
         update_user_stat(user_stat, %{data: new_data})
     end
@@ -323,7 +196,7 @@ defmodule Teiserver.Account do
         :ok
 
       user_stat ->
-        Central.cache_delete(:teiserver_user_stat_cache, userid)
+        Teiserver.cache_delete(:teiserver_user_stat_cache, userid)
         new_data = Map.drop(user_stat.data, keys)
         update_user_stat(user_stat, %{data: new_data})
     end
@@ -331,7 +204,7 @@ defmodule Teiserver.Account do
 
   @spec delete_user_stat(UserStat.t()) :: {:ok, UserStat.t()} | {:error, Ecto.Changeset.t()}
   def delete_user_stat(%UserStat{} = user_stat) do
-    Central.cache_delete(:teiserver_user_stat_cache, user_stat.user_id)
+    Teiserver.cache_delete(:teiserver_user_stat_cache, user_stat.user_id)
     Repo.delete(user_stat)
   end
 
@@ -349,7 +222,7 @@ defmodule Teiserver.Account do
     |> BadgeTypeLib.search(args[:search])
     |> BadgeTypeLib.preload(args[:preload])
     |> BadgeTypeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -504,7 +377,7 @@ defmodule Teiserver.Account do
     |> AccoladeLib.search(args[:search])
     |> AccoladeLib.preload(args[:preload])
     |> AccoladeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -659,7 +532,7 @@ defmodule Teiserver.Account do
     |> SmurfKeyLib.search(args[:search])
     |> SmurfKeyLib.preload(args[:preload])
     |> SmurfKeyLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -844,6 +717,30 @@ defmodule Teiserver.Account do
     SmurfKey.changeset(smurf_key, %{})
   end
 
+  @spec smurf_search(User.t()) :: [{{String.t(), String.t()}, [SmurfKey.t()]}]
+  def smurf_search(user) do
+    values =
+      list_smurf_keys(
+        search: [
+          user_id: user.id
+        ],
+        limit: :infinity,
+        select: [:value]
+      )
+      |> Enum.map(fn %{value: value} -> value end)
+
+    list_smurf_keys(
+      search: [
+        value_in: values,
+        not_user_id: user.id
+      ],
+      preload: [:user, :type],
+      limit: :infinity
+    )
+    |> Enum.group_by(fn sk -> {sk.type.name, sk.value} end)
+    |> Enum.sort_by(fn {key, _value} -> key end, &<=/2)
+  end
+
   alias Teiserver.Account.SmurfKeyType
   alias Teiserver.Account.SmurfKeyTypeLib
 
@@ -859,7 +756,7 @@ defmodule Teiserver.Account do
     |> SmurfKeyTypeLib.search(args[:search])
     |> SmurfKeyTypeLib.preload(args[:preload])
     |> SmurfKeyTypeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -949,7 +846,7 @@ defmodule Teiserver.Account do
   def get_or_add_smurf_key_type(name) do
     name = String.trim(name)
 
-    Central.cache_get_or_store(:teiserver_account_smurf_key_types, name, fn ->
+    Teiserver.cache_get_or_store(:teiserver_account_smurf_key_types, name, fn ->
       case list_smurf_key_types(
              search: [name: name],
              select: [:id],
@@ -977,7 +874,7 @@ defmodule Teiserver.Account do
     |> RatingLib.search(args[:search])
     |> RatingLib.preload(args[:preload])
     |> RatingLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
     |> QueryHelpers.limit_query(args[:limit] || 50)
   end
 
@@ -1019,7 +916,7 @@ defmodule Teiserver.Account do
 
   def get_rating(user_id, rating_type_id)
       when is_integer(user_id) and is_integer(rating_type_id) do
-    Central.cache_get_or_store(:teiserver_user_ratings, {user_id, rating_type_id}, fn ->
+    Teiserver.cache_get_or_store(:teiserver_user_ratings, {user_id, rating_type_id}, fn ->
       rating_query(
         search: [
           user_id: user_id,
@@ -1051,6 +948,26 @@ defmodule Teiserver.Account do
     end
   end
 
+  @spec get_player_lowest_uncertainty(T.userid()) :: number()
+  def get_player_lowest_uncertainty(user_id) do
+    result =
+      rating_query(
+        search: [
+          user_id: user_id
+        ],
+        select: [:uncertainty],
+        order_by: "Uncertainty low to high",
+        limit: 1
+      )
+      |> Repo.one()
+
+    if result do
+      result.uncertainty
+    else
+      0
+    end
+  end
+
   @doc """
   Creates a rating.
 
@@ -1072,7 +989,7 @@ defmodule Teiserver.Account do
 
   @spec update_rating(Rating.t(), map()) :: {:ok, Rating.t()} | {:error, Ecto.Changeset.t()}
   def update_rating(%Rating{} = rating, attrs) do
-    Central.cache_delete(:teiserver_user_ratings, {rating.user_id, rating.rating_type_id})
+    Teiserver.cache_delete(:teiserver_user_ratings, {rating.user_id, rating.rating_type_id})
 
     rating
     |> Rating.changeset(attrs)
@@ -1104,7 +1021,7 @@ defmodule Teiserver.Account do
   """
   @spec delete_rating(Rating.t()) :: {:ok, Rating.t()} | {:error, Ecto.Changeset.t()}
   def delete_rating(%Rating{} = rating) do
-    Central.cache_delete(:teiserver_user_ratings, {rating.user_id, rating.rating_type_id})
+    Teiserver.cache_delete(:teiserver_user_ratings, {rating.user_id, rating.rating_type_id})
     Repo.delete(rating)
   end
 
@@ -1121,7 +1038,7 @@ defmodule Teiserver.Account do
     |> CodeLib.search(args[:search])
     |> CodeLib.preload(args[:preload])
     |> CodeLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -1263,7 +1180,7 @@ defmodule Teiserver.Account do
     |> UserTokenLib.search(args[:search])
     |> UserTokenLib.preload(args[:preload])
     |> UserTokenLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -1412,62 +1329,712 @@ defmodule Teiserver.Account do
     |> binary_part(0, length)
   end
 
+  alias Teiserver.Account.{Relationship, RelationshipLib, RelationshipQueries}
+
+  @doc """
+  Returns the list of relationships.
+
+  ## Examples
+
+      iex> list_relationships()
+      [%Relationship{}, ...]
+
+  """
+  @spec list_relationships(list) :: list
+  def list_relationships(args \\ []) do
+    args
+    |> RelationshipQueries.query_relationships()
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single relationship.
+
+  Raises `Ecto.NoResultsError` if the Relationship does not exist.
+
+  ## Examples
+
+      iex> get_relationship!(123)
+      %Relationship{}
+
+      iex> get_relationship!(456)
+      ** (Ecto.NoResultsError)
+
+  """
+  def get_relationship!(from_id, to_id), do: get_relationship!(from_id, to_id, [])
+
+  def get_relationship!(from_id, to_id, args) do
+    args = args ++ [from_user_id: from_id, to_user_id: to_id]
+
+    args
+    |> RelationshipQueries.query_relationships()
+    |> Repo.one!()
+  end
+
+  @doc """
+  Gets a single relationship, returns nil if the relationship doesn't exist
+
+  ## Examples
+
+      iex> get_relationship(123)
+      %Relationship{}
+
+      iex> get_relationship(456)
+      nil
+
+  """
+  def get_relationship(from_id, to_id), do: get_relationship(from_id, to_id, [])
+
+  def get_relationship(from_id, to_id, args) do
+    args = args ++ [from_user_id: from_id, to_user_id: to_id]
+
+    args
+    |> RelationshipQueries.query_relationships()
+    |> Repo.one()
+  end
+
+  @doc """
+  Creates a relationship.
+
+  ## Examples
+
+      iex> create_relationship(%{field: value})
+      {:ok, %Relationship{}}
+
+      iex> create_relationship(%{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def create_relationship(attrs \\ %{}) do
+    %Relationship{}
+    |> Relationship.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates or inserts a relationship.
+
+  ## Examples
+
+      iex> upsert(%{field: value})
+      {:ok, %Relationship{}}
+
+      iex> upsert(%{field: value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def upsert_relationship(attrs) do
+    conflict_sets =
+      ~w(state ignore notes tags)a
+      |> Enum.filter(fn key ->
+        Map.has_key?(attrs, key) or Map.has_key?(attrs, to_string(key))
+      end)
+      |> Enum.map(fn key ->
+        value = Map.get(attrs, key, Map.get(attrs, to_string(key), nil))
+        {key, value}
+      end)
+      |> Keyword.new()
+
+    %Relationship{}
+    |> Relationship.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: [set: conflict_sets],
+      conflict_target: ~w(from_user_id to_user_id)a
+    )
+
+    # %Relationship{}
+    # |> Relationship.changeset(attrs)
+    # |> Repo.insert(
+    #   on_conflict: [set: [
+    #     state: Map.get(attrs, "state", Map.get(attrs, :state, nil)),
+    #     ignore: Map.get(attrs, "ignore", Map.get(attrs, :ignore, nil)),
+    #     notes: Map.get(attrs, "notes", Map.get(attrs, :notes, nil)),
+    #     tags: Map.get(attrs, "tags", Map.get(attrs, :tags, nil))
+    #   ]],
+    #   conflict_target: ~w(from_user_id to_user_id)a
+    # )
+  end
+
+  @doc """
+  Updates a relationship.
+
+  ## Examples
+
+      iex> update_relationship(relationship, %{field: new_value})
+      {:ok, %Relationship{}}
+
+      iex> update_relationship(relationship, %{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def update_relationship(%Relationship{} = relationship, attrs) do
+    relationship
+    |> Relationship.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a relationship.
+
+  ## Examples
+
+      iex> delete_relationship(relationship)
+      {:ok, %Relationship{}}
+
+      iex> delete_relationship(relationship)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def delete_relationship(%Relationship{} = relationship) do
+    Repo.delete(relationship)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking relationship changes.
+
+  ## Examples
+
+      iex> change_relationship(relationship)
+      %Ecto.Changeset{data: %Relationship{}}
+
+  """
+  def change_relationship(%Relationship{} = relationship, attrs \\ %{}) do
+    Relationship.changeset(relationship, attrs)
+  end
+
+  @spec verb_of_state(String.t() | map) :: String.t()
+  defdelegate verb_of_state(state), to: RelationshipLib
+
+  @spec past_tense_of_state(String.t() | map) :: String.t()
+  defdelegate past_tense_of_state(state), to: RelationshipLib
+
+  @spec follow_user(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate follow_user(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec ignore_user(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate ignore_user(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec unignore_user(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate unignore_user(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec avoid_user(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate avoid_user(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec block_user(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate block_user(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec reset_relationship_state(T.userid(), T.userid()) :: {:ok, Relationship.t()}
+  defdelegate reset_relationship_state(from_user_id, to_user_id), to: RelationshipLib
+
+  @spec calculate_relationship_stats(T.userid()) :: :ok
+  defdelegate calculate_relationship_stats(userid), to: RelationshipLib
+
+  @spec decache_relationships(T.userid()) :: :ok
+  defdelegate decache_relationships(userid), to: RelationshipLib
+
+  @spec list_userids_avoiding_this_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_avoiding_this_userid(userid), to: RelationshipLib
+
+  @spec list_userids_avoided_by_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_avoided_by_userid(userid), to: RelationshipLib
+
+  @spec list_userids_blocking_this_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_blocking_this_userid(userid), to: RelationshipLib
+
+  @spec list_userids_blocked_by_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_blocked_by_userid(userid), to: RelationshipLib
+
+  @spec list_userids_ignored_by_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_ignored_by_userid(userid), to: RelationshipLib
+
+  @spec list_userids_followed_by_userid(T.userid()) :: [T.userid()]
+  defdelegate list_userids_followed_by_userid(userid), to: RelationshipLib
+
+  @spec does_a_follow_b?(T.userid(), T.userid()) :: boolean
+  defdelegate does_a_follow_b?(u1, u2), to: RelationshipLib
+
+  @spec does_a_ignore_b?(T.userid(), T.userid()) :: boolean
+  defdelegate does_a_ignore_b?(u1, u2), to: RelationshipLib
+
+  @spec does_a_block_b?(T.userid(), T.userid()) :: boolean
+  defdelegate does_a_block_b?(u1, u2), to: RelationshipLib
+
+  @spec does_a_avoid_b?(T.userid(), T.userid()) :: boolean
+  defdelegate does_a_avoid_b?(u1, u2), to: RelationshipLib
+
+  @spec check_block_status(T.userid(), [T.userid()]) :: :ok | :blocking | :blocked
+  defdelegate check_block_status(userid, userid_list), to: RelationshipLib
+
+  @spec check_avoid_status(T.userid(), [T.userid()]) :: :ok | :avoiding | :avoided
+  defdelegate check_avoid_status(userid, userid_list), to: RelationshipLib
+
+  @spec profile_view_permissions(
+          T.user(),
+          T.user(),
+          nil | Account.Relationship,
+          nil | Account.Friend,
+          nil | Account.FriendRequest
+        ) :: [atom]
+  defdelegate profile_view_permissions(u1, u2, relationship, friend, friendship_request),
+    to: RelationshipLib
+
+  alias Teiserver.Account.{Friend, FriendLib, FriendQueries}
+
+  @doc """
+  Returns the list of friends.
+
+  ## Examples
+
+      iex> list_friends()
+      [%Friend{}, ...]
+
+  """
+  @spec list_friends(list) :: list
+  def list_friends(args \\ []) do
+    args
+    |> FriendQueries.query_friends()
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single friend.
+
+  Raises `Ecto.NoResultsError` if the Friend does not exist.
+
+  ## Examples
+
+      iex> get_friend!(123)
+      %Friend{}
+
+      iex> get_friend!(456)
+      ** (Ecto.NoResultsError)
+
+  """
+  def get_friend!(from_id, to_id), do: get_friend!(from_id, to_id, [])
+
+  def get_friend!(from_id, to_id, args) do
+    args = args ++ [users: [from_id, to_id]]
+
+    args
+    |> FriendQueries.query_friends()
+    |> Repo.one!()
+  end
+
+  @doc """
+  Gets a single friend, returns nil if the friend doesn't exist
+
+  ## Examples
+
+      iex> get_friend(123)
+      %Friend{}
+
+      iex> get_friend(456)
+      nil
+
+  """
+  def get_friend(from_id, to_id), do: get_friend(from_id, to_id, [])
+
+  def get_friend(from_id, to_id, args) do
+    args = args ++ [users: [from_id, to_id]]
+
+    args
+    |> FriendQueries.query_friends()
+    |> Repo.one()
+  end
+
+  @doc """
+  Creates a friend.
+
+  ## Examples
+
+      iex> create_friend(%{field: value})
+      {:ok, %Friend{}}
+
+      iex> create_friend(%{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  @spec create_friend() :: {:ok, Friend.t()} | {:error, Ecto.Changeset.t()}
+  @spec create_friend(map) :: {:ok, Friend.t()} | {:error, Ecto.Changeset.t()}
+  def create_friend(attrs \\ %{}) do
+    result =
+      %Friend{}
+      |> Friend.changeset(attrs)
+      |> Repo.insert()
+
+    case result do
+      {:ok, friend} ->
+        Teiserver.cache_delete(:account_friend_cache, friend.user1_id)
+        Teiserver.cache_delete(:account_friend_cache, friend.user2_id)
+
+      _ ->
+        :ok
+    end
+
+    result
+  end
+
+  @spec create_friend(T.userid(), T.userid()) :: {:ok, Friend.t()} | {:error, Ecto.Changeset.t()}
+  def create_friend(uid1, uid2) do
+    [u1, u2] = Enum.sort([uid1, uid2])
+
+    create_friend(%{
+      user1_id: u1,
+      user2_id: u2
+    })
+  end
+
+  @doc """
+  Updates a friend.
+
+  ## Examples
+
+      iex> update_friend(friend, %{field: new_value})
+      {:ok, %Friend{}}
+
+      iex> update_friend(friend, %{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def update_friend(%Friend{} = friend, attrs) do
+    friend
+    |> Friend.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a friend.
+
+  ## Examples
+
+      iex> delete_friend(friend)
+      {:ok, %Friend{}}
+
+      iex> delete_friend(friend)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def delete_friend(%Friend{} = friend) do
+    PubSub.broadcast(
+      Teiserver.PubSub,
+      "account_user_relationships:#{friend.user1_id}",
+      %{
+        channel: "account_user_relationships:#{friend.user1_id}",
+        event: :friend_deleted,
+        userid: friend.user1_id,
+        from_id: friend.user2_id
+      }
+    )
+
+    PubSub.broadcast(
+      Teiserver.PubSub,
+      "account_user_relationships:#{friend.user2_id}",
+      %{
+        channel: "account_user_relationships:#{friend.user2_id}",
+        event: :friend_deleted,
+        userid: friend.user2_id,
+        from_id: friend.user1_id
+      }
+    )
+
+    Teiserver.cache_delete(:account_friend_cache, friend.user1_id)
+    Teiserver.cache_delete(:account_friend_cache, friend.user2_id)
+    Repo.delete(friend)
+  end
+
+  def delete_friend(u1, u2) do
+    case get_friend(u1, u2) do
+      nil ->
+        :ok
+
+      friend ->
+        delete_friend(friend)
+    end
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking friend changes.
+
+  ## Examples
+
+      iex> change_friend(friend)
+      %Ecto.Changeset{data: %Friend{}}
+
+  """
+  def change_friend(%Friend{} = friend, attrs \\ %{}) do
+    Friend.changeset(friend, attrs)
+  end
+
+  @spec list_friend_ids_of_user(T.userid()) :: [T.userid()]
+  defdelegate list_friend_ids_of_user(userid), to: FriendLib
+
+  alias Teiserver.Account.{FriendRequest, FriendRequestLib, FriendRequestQueries}
+
+  @doc """
+  Returns the list of friend_requests.
+
+  ## Examples
+
+      iex> list_friend_requests()
+      [%FriendRequest{}, ...]
+
+  """
+  @spec list_friend_requests(list) :: list
+  def list_friend_requests(args \\ []) do
+    args
+    |> FriendRequestQueries.query_friend_requests()
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single friend_request.
+
+  Raises `Ecto.NoResultsError` if the FriendRequest does not exist.
+
+  ## Examples
+
+      iex> get_friend_request!(123)
+      %FriendRequest{}
+
+      iex> get_friend_request!(456)
+      ** (Ecto.NoResultsError)
+
+  """
+  def get_friend_request!(from_id, to_id), do: get_friend_request!(from_id, to_id, [])
+
+  def get_friend_request!(from_id, to_id, args) do
+    args = args ++ [from_user_id: from_id, to_user_id: to_id]
+
+    args
+    |> FriendRequestQueries.query_friend_requests()
+    |> Repo.one!()
+  end
+
+  @doc """
+  Gets a single friend_request, returns nil if the friend_request doesn't exist
+
+  ## Examples
+
+      iex> get_friend_request(123)
+      %FriendRequest{}
+
+      iex> get_friend_request(456)
+      nil
+
+  """
+  def get_friend_request(from_id, to_id), do: get_friend_request(from_id, to_id, [])
+
+  def get_friend_request(from_id, to_id, args) do
+    args = args ++ [from_user_id: from_id, to_user_id: to_id]
+
+    args
+    |> FriendRequestQueries.query_friend_requests()
+    |> Repo.one()
+  end
+
+  @doc """
+  Creates a friend_request.
+
+  ## Examples
+
+      iex> create_friend_request(%{field: value})
+      {:ok, %FriendRequest{}}
+
+      iex> create_friend_request(%{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def create_friend_request(attrs \\ %{}) do
+    result =
+      %FriendRequest{}
+      |> FriendRequest.changeset(attrs)
+      |> Repo.insert()
+
+    case result do
+      {:ok, friend_request} ->
+        PubSub.broadcast(
+          Teiserver.PubSub,
+          "account_user_relationships:#{friend_request.to_user_id}",
+          %{
+            channel: "account_user_relationships:#{friend_request.to_user_id}",
+            event: :new_incoming_friend_request,
+            userid: friend_request.to_user_id,
+            from_id: friend_request.from_user_id
+          }
+        )
+
+        Teiserver.cache_delete(:account_incoming_friend_request_cache, friend_request.to_user_id)
+        Teiserver.cache_delete(:account_outgoing_friend_request_cache, friend_request.to_user_id)
+
+      _ ->
+        :ok
+    end
+
+    result
+  end
+
+  def create_friend_request(from_user_id, to_user_id) do
+    if from_user_id == to_user_id do
+      {:error, "Cannot add yourself as a friend"}
+    else
+      create_friend_request(%{
+        from_user_id: from_user_id,
+        to_user_id: to_user_id
+      })
+    end
+  end
+
+  @doc """
+  Updates a friend_request.
+
+  ## Examples
+
+      iex> update_friend_request(friend_request, %{field: new_value})
+      {:ok, %FriendRequest{}}
+
+      iex> update_friend_request(friend_request, %{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def update_friend_request(%FriendRequest{} = friend_request, attrs) do
+    friend_request
+    |> FriendRequest.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a friend_request.
+
+  ## Examples
+
+      iex> delete_friend_request(friend_request)
+      {:ok, %FriendRequest{}}
+
+      iex> delete_friend_request(friend_request)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def delete_friend_request(%FriendRequest{} = friend_request) do
+    Teiserver.cache_delete(:account_incoming_friend_request_cache, friend_request.to_user_id)
+    Teiserver.cache_delete(:account_outgoing_friend_request_cache, friend_request.from_user_id)
+    Repo.delete(friend_request)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking friend_request changes.
+
+  ## Examples
+
+      iex> change_friend_request(friend_request)
+      %Ecto.Changeset{data: %FriendRequest{}}
+
+  """
+  def change_friend_request(%FriendRequest{} = friend_request, attrs \\ %{}) do
+    FriendRequest.changeset(friend_request, attrs)
+  end
+
+  @spec can_send_friend_request?(T.userid(), T.userid()) :: boolean
+  defdelegate can_send_friend_request?(from_id, to_id), to: FriendRequestLib
+
+  @spec can_send_friend_request_with_reason?(T.userid(), T.userid()) ::
+          {true, :ok} | {false, String.t()}
+  defdelegate can_send_friend_request_with_reason?(from_id, to_id), to: FriendRequestLib
+
+  @spec list_outgoing_friend_requests_of_userid(T.userid()) :: [T.userid()]
+  defdelegate list_outgoing_friend_requests_of_userid(userid), to: FriendRequestLib
+
+  @spec list_incoming_friend_requests_of_userid(T.userid()) :: [T.userid()]
+  defdelegate list_incoming_friend_requests_of_userid(userid), to: FriendRequestLib
+
+  @spec accept_friend_request(T.userid(), T.userid()) :: :ok | {:error, String.t()}
+  defdelegate accept_friend_request(from_userid, to_userid), to: FriendRequestLib
+
+  @spec accept_friend_request(FriendRequest.t()) :: :ok | {:error, String.t()}
+  defdelegate accept_friend_request(req), to: FriendRequestLib
+
+  @spec decline_friend_request(T.userid(), T.userid()) :: :ok | {:error, String.t()}
+  defdelegate decline_friend_request(from_userid, to_userid), to: FriendRequestLib
+
+  @spec decline_friend_request(FriendRequest.t()) :: :ok | {:error, String.t()}
+  defdelegate decline_friend_request(req), to: FriendRequestLib
+
+  @spec rescind_friend_request(T.userid(), T.userid()) :: :ok | {:error, String.t()}
+  defdelegate rescind_friend_request(from_userid, to_userid), to: FriendRequestLib
+
+  @spec rescind_friend_request(FriendRequest.t()) :: :ok | {:error, String.t()}
+  defdelegate rescind_friend_request(req), to: FriendRequestLib
+
   # User functions
-  alias alias Teiserver.Account.UserCache
+  alias Teiserver.Account.UserCacheLib
 
   @spec get_username(T.userid()) :: String.t() | nil
-  defdelegate get_username(userid), to: UserCache
+  defdelegate get_username(userid), to: UserCacheLib
 
   @spec get_username_by_id(T.userid()) :: String.t() | nil
-  defdelegate get_username_by_id(userid), to: UserCache
+  defdelegate get_username_by_id(userid), to: UserCacheLib
 
   @spec get_userid_from_name(String.t()) :: integer() | nil
-  def get_userid_from_name(name), do: UserCache.get_userid(name)
+  def get_userid_from_name(name), do: UserCacheLib.get_userid(name)
 
   @spec get_user_by_name(String.t()) :: T.user() | nil
-  defdelegate get_user_by_name(username), to: UserCache
+  defdelegate get_user_by_name(username), to: UserCacheLib
 
   @spec get_user_by_email(String.t()) :: T.user() | nil
-  defdelegate get_user_by_email(email), to: UserCache
+  defdelegate get_user_by_email(email), to: UserCacheLib
 
   @spec get_user_by_discord_id(String.t()) :: T.user() | nil
-  defdelegate get_user_by_discord_id(discord_id), to: UserCache
+  defdelegate get_user_by_discord_id(discord_id), to: UserCacheLib
 
   @spec get_userid_by_discord_id(String.t()) :: T.userid() | nil
-  defdelegate get_userid_by_discord_id(discord_id), to: UserCache
+  defdelegate get_userid_by_discord_id(discord_id), to: UserCacheLib
 
   @spec get_user_by_token(String.t()) :: T.user() | nil
-  defdelegate get_user_by_token(token), to: UserCache
+  defdelegate get_user_by_token(token), to: UserCacheLib
 
   @spec get_user_by_id(T.userid()) :: T.user() | nil
-  defdelegate get_user_by_id(id), to: UserCache
+  defdelegate get_user_by_id(id), to: UserCacheLib
 
   @spec list_users_from_cache(list) :: list
-  def list_users_from_cache(id_list), do: UserCache.list_users(id_list)
+  def list_users_from_cache(id_list), do: UserCacheLib.list_users(id_list)
 
   @spec recache_user(T.userid() | User.t()) :: :ok
-  defdelegate recache_user(id), to: UserCache
+  defdelegate recache_user(id), to: UserCacheLib
 
   @spec convert_user(T.user()) :: T.user()
-  defdelegate convert_user(user), to: UserCache
+  defdelegate convert_user(user), to: UserCacheLib
 
   @spec add_user(T.user()) :: T.user()
-  defdelegate add_user(user), to: UserCache
+  defdelegate add_user(user), to: UserCacheLib
 
   @spec update_cache_user(T.userid(), map()) :: T.user()
-  def update_cache_user(userid, user), do: UserCache.update_cache_user(userid, user)
+  def update_cache_user(userid, user), do: UserCacheLib.update_cache_user(userid, user)
 
   @spec decache_user(T.userid()) :: :ok | :no_user
-  defdelegate decache_user(userid), to: UserCache
+  defdelegate decache_user(userid), to: UserCacheLib
 
   @spec make_bot_password() :: String.t()
   defdelegate make_bot_password(), to: UserLib
 
   @spec rename_user(T.userid(), String.t(), boolean) :: :success | {:error, String.t()}
-  defdelegate rename_user(userid, new_name, admin_action \\ false), to: Teiserver.User
+  defdelegate rename_user(userid, new_name, admin_action \\ false), to: Teiserver.CacheUser
 
   @spec system_change_user_name(T.userid(), String.t()) :: :ok
-  defdelegate system_change_user_name(userid, new_name), to: Teiserver.User
+  defdelegate system_change_user_name(userid, new_name), to: Teiserver.CacheUser
+
+  @spec has_any_role?(T.userid() | T.user() | nil, String.t() | [String.t()]) :: boolean()
+  defdelegate has_any_role?(user_or_userid, roles), to: Teiserver.CacheUser
+
+  @spec has_all_roles?(T.userid() | T.user() | nil, String.t() | [String.t()]) :: boolean()
+  defdelegate has_all_roles?(user_or_userid, roles), to: Teiserver.CacheUser
+
+  @spec is_moderator?(T.userid()) :: boolean()
+  defdelegate is_moderator?(userid), to: Teiserver.CacheUser
+
+  @spec is_bot?(T.userid()) :: boolean()
+  defdelegate is_bot?(userid), to: Teiserver.CacheUser
+
+  @spec is_restricted?(T.userid() | T.user(), String.t()) :: boolean()
+  defdelegate is_restricted?(user, restriction), to: Teiserver.CacheUser
 
   # Client stuff
   alias Teiserver.Account.ClientLib
@@ -1493,10 +2060,14 @@ defmodule Teiserver.Account do
   @spec list_clients([T.userid()]) :: [T.client()]
   defdelegate list_clients(id_list), to: ClientLib
 
-  @spec merge_update_client(Map.t()) :: :ok
+  @spec update_client(T.userid(), Map.t()) :: nil | :ok
+  defdelegate update_client(userid, partial_client), to: ClientLib
+
+  # TODO: Remove these in favour of update_client
+  @spec merge_update_client(Map.t()) :: nil | :ok
   defdelegate merge_update_client(client), to: ClientLib
 
-  @spec merge_update_client(T.userid(), Map.t()) :: :ok
+  @spec merge_update_client(T.userid(), Map.t()) :: nil | :ok
   defdelegate merge_update_client(userid, client), to: ClientLib
 
   @spec replace_update_client(

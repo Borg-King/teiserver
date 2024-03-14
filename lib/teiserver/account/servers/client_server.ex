@@ -1,7 +1,8 @@
 defmodule Teiserver.Account.ClientServer do
+  @moduledoc false
   use GenServer
   require Logger
-  alias Teiserver.Battle.LobbyChat
+  alias Teiserver.Lobby.ChatLib
   alias Phoenix.PubSub
 
   @impl true
@@ -20,7 +21,7 @@ defmodule Teiserver.Account.ClientServer do
 
       existing_id ->
         PubSub.broadcast(
-          Central.PubSub,
+          Teiserver.PubSub,
           "teiserver_client_messages:#{state.userid}",
           %{
             channel: "teiserver_client_messages:#{state.userid}",
@@ -30,7 +31,7 @@ defmodule Teiserver.Account.ClientServer do
         )
 
         PubSub.broadcast(
-          Central.PubSub,
+          Teiserver.PubSub,
           "teiserver_client_watch:#{state.userid}",
           %{
             channel: "teiserver_client_watch:#{state.userid}",
@@ -46,7 +47,7 @@ defmodule Teiserver.Account.ClientServer do
 
     if party_id != nil do
       PubSub.broadcast(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_messages:#{state.userid}",
         %{
           channel: "teiserver_client_messages:#{state.userid}",
@@ -56,7 +57,7 @@ defmodule Teiserver.Account.ClientServer do
       )
 
       PubSub.broadcast(
-        Central.PubSub,
+        Teiserver.PubSub,
         "teiserver_client_watch:#{state.userid}",
         %{
           channel: "teiserver_client_watch:#{state.userid}",
@@ -67,11 +68,12 @@ defmodule Teiserver.Account.ClientServer do
     end
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{state.userid}",
       %{
         channel: "teiserver_client_messages:#{state.userid}",
         event: :client_updated,
+        userid: state.userid,
         client: new_client
       }
     )
@@ -80,49 +82,80 @@ defmodule Teiserver.Account.ClientServer do
   end
 
   @impl true
-  def handle_cast({:update_values, new_values}, state) do
-    new_client = Map.merge(state.client, new_values)
+  def handle_cast({:update_values, partial_client}, state) do
+    new_client = Map.merge(state.client, partial_client)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{state.userid}",
       %{
         channel: "teiserver_client_messages:#{state.userid}",
         event: :client_updated,
+        userid: state.userid,
         client: new_client
       }
     )
+
+    if state.client.lobby_id do
+      PubSub.broadcast(
+        Teiserver.PubSub,
+        "teiserver_lobby_updates:#{state.client.lobby_id}",
+        %{
+          channel: "teiserver_lobby_updates",
+          event: :updated_client_battlestatus,
+          lobby_id: state.client.lobby_id,
+          userid: state.userid,
+          client: partial_client
+        }
+      )
+    end
 
     {:noreply, %{state | client: new_client}}
   end
 
   def handle_cast({:merge_update_client, partial_client}, state) do
+    Logger.warn(":merge_update_client is still being used, instead use :update_values")
     new_client = Map.merge(state.client, partial_client)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{state.userid}",
       %{
         channel: "teiserver_client_messages:#{state.userid}",
         event: :client_updated,
-        client: new_client
+        userid: state.userid,
+        client: partial_client
       }
     )
+
+    if state.client.lobby_id do
+      PubSub.broadcast(
+        Teiserver.PubSub,
+        "teiserver_lobby_updates:#{state.client.lobby_id}",
+        %{
+          channel: "teiserver_lobby_updates",
+          event: :updated_client_battlestatus,
+          lobby_id: state.client.lobby_id,
+          userid: state.userid,
+          client: partial_client
+        }
+      )
+    end
 
     {:noreply, %{state | client: new_client}}
   end
 
   def handle_cast({:update_client, new_client}, state) do
     if state.client.player != new_client.player and
-         not Application.get_env(:central, Teiserver)[:test_mode] do
+         not Application.get_env(:teiserver, Teiserver)[:test_mode] do
       if state.client.lobby_id do
         if new_client.player do
-          LobbyChat.persist_system_message(
+          ChatLib.persist_system_message(
             "#{state.client.name} became a player",
             state.client.lobby_id
           )
         else
-          LobbyChat.persist_system_message(
+          ChatLib.persist_system_message(
             "#{state.client.name} became a spectator",
             state.client.lobby_id
           )
@@ -133,11 +166,12 @@ defmodule Teiserver.Account.ClientServer do
     new_client = Map.merge(state.client, new_client)
 
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_client_messages:#{state.userid}",
       %{
         channel: "teiserver_client_messages:#{state.userid}",
         event: :client_updated,
+        userid: state.userid,
         client: new_client
       }
     )
@@ -162,15 +196,18 @@ defmodule Teiserver.Account.ClientServer do
     {:noreply, %{state | client: new_client}}
   end
 
+  def handle_cast({:update_tcp_pid, new_pid}, state) do
+    new_client = Map.merge(state.client, %{tcp_pid: new_pid})
+    {:noreply, %{state | client: new_client}}
+  end
+
   @impl true
   def handle_info(:heartbeat, %{client: client_state} = state) do
     cond do
       client_state.tcp_pid == nil ->
-        Logger.error("client_state.tcp_pid is nil - disconnecting")
         DynamicSupervisor.terminate_child(Teiserver.ClientSupervisor, self())
 
       Process.alive?(client_state.tcp_pid) == false ->
-        Logger.error("client_state.tcp_pid is not alive - disconnecting")
         DynamicSupervisor.terminate_child(Teiserver.ClientSupervisor, self())
 
       true ->

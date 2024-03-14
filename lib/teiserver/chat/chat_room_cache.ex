@@ -1,8 +1,8 @@
 defmodule Teiserver.Room do
   @moduledoc false
   require Logger
-  alias Teiserver.{User, Chat, Coordinator, Moderation}
-  alias alias Teiserver.Chat.WordLib
+  alias Teiserver.{Account, CacheUser, Chat, Coordinator, Moderation}
+  alias Teiserver.Chat.WordLib
   alias Phoenix.PubSub
   alias Teiserver.Data.Types, as: T
 
@@ -34,24 +34,24 @@ defmodule Teiserver.Room do
   end
 
   def remove_room(room_name) do
-    Central.cache_delete(:rooms, room_name)
+    Teiserver.cache_delete(:rooms, room_name)
   end
 
   @spec get_room(String.t()) :: Map.t()
   def get_room(name) do
-    Central.cache_get(:rooms, name)
+    Teiserver.cache_get(:rooms, name)
   end
 
   @spec can_join_room?(T.userid(), String.t()) :: true | {false, String.t()}
   def can_join_room?(userid, room_name) do
     room = get_or_make_room(room_name, userid)
-    user = User.get_user_by_id(userid)
+    user = Account.get_user_by_id(userid)
 
     cond do
       user == nil ->
         {false, "No user"}
 
-      User.is_moderator?(user) == true ->
+      CacheUser.is_moderator?(user) == true ->
         true
 
       room.clan_id ->
@@ -65,7 +65,7 @@ defmodule Teiserver.Room do
   @spec get_or_make_room(String.t(), T.userid()) :: Map.t()
   @spec get_or_make_room(String.t(), T.userid(), T.clan_id()) :: Map.t()
   def get_or_make_room(name, author_id, clan_id \\ nil) do
-    case Central.cache_get(:rooms, name) do
+    case Teiserver.cache_get(:rooms, name) do
       nil ->
         # No room, we need to make one!
         create_room(name, author_id, clan_id)
@@ -77,14 +77,14 @@ defmodule Teiserver.Room do
   end
 
   def add_user_to_room(userid, room_name) do
-    Central.cache_update(:rooms, room_name, fn room_state ->
+    Teiserver.cache_update(:rooms, room_name, fn room_state ->
       new_state =
         if Enum.member?(room_state.members, userid) do
           # No change takes place, they're already in the room!
           room_state
         else
           PubSub.broadcast(
-            Central.PubSub,
+            Teiserver.PubSub,
             "room:#{room_name}",
             {:add_user_to_room, userid, room_name}
           )
@@ -98,20 +98,20 @@ defmodule Teiserver.Room do
   end
 
   def remove_user_from_room(userid, room_name) do
-    Central.cache_update(:rooms, room_name, fn room_state ->
+    Teiserver.cache_update(:rooms, room_name, fn room_state ->
       new_state =
-        if not Enum.member?(room_state.members, userid) do
-          # No change takes place, they've already left the room
-          room_state
-        else
+        if Enum.member?(room_state.members, userid) do
           PubSub.broadcast(
-            Central.PubSub,
+            Teiserver.PubSub,
             "room:#{room_name}",
             {:remove_user_from_room, userid, room_name}
           )
 
           new_members = Enum.filter(room_state.members, fn m -> m != userid end)
           Map.put(room_state, :members, new_members)
+        else
+          # No change takes place, they've already left the room
+          room_state
         end
 
       {:ok, new_state}
@@ -123,8 +123,7 @@ defmodule Teiserver.Room do
 
   def remove_user_from_any_room(userid) do
     list_rooms()
-    |> Enum.filter(fn r -> r != nil end)
-    |> Enum.filter(fn r -> Enum.member?(r.members, userid) end)
+    |> Enum.filter(fn r -> r && Enum.member?(r.members, userid) end)
     |> Enum.map(fn r ->
       remove_user_from_room(userid, r.name)
       r.name
@@ -142,9 +141,9 @@ defmodule Teiserver.Room do
   end
 
   def add_room(room) do
-    Central.cache_put(:rooms, room.name, room)
+    Teiserver.cache_put(:rooms, room.name, room)
 
-    Central.cache_update(:lists, :rooms, fn value ->
+    Teiserver.cache_update(:lists, :rooms, fn value ->
       new_value =
         [room.name | value]
         |> Enum.uniq()
@@ -156,26 +155,26 @@ defmodule Teiserver.Room do
   end
 
   def list_rooms() do
-    Central.cache_get(:lists, :rooms)
-    |> Enum.map(fn room_name -> Central.cache_get(:rooms, room_name) end)
+    Teiserver.cache_get(:lists, :rooms)
+    |> Enum.map(fn room_name -> Teiserver.cache_get(:rooms, room_name) end)
   end
 
   @spec send_message(T.userid(), String.t(), String.t()) :: nil | :ok
   def send_message(from_id, _room_name, "$" <> msg) do
-    User.send_direct_message(from_id, Coordinator.get_coordinator_userid(), "$" <> msg)
+    CacheUser.send_direct_message(from_id, Coordinator.get_coordinator_userid(), "$" <> msg)
   end
 
   def send_message(from_id, room_name, msg) do
-    user = User.get_user_by_id(from_id)
+    user = Account.get_user_by_id(from_id)
 
-    if User.is_bot?(user) == false and WordLib.flagged_words(msg) > 0 do
+    if CacheUser.is_bot?(user) == false and WordLib.flagged_words(msg) > 0 do
       Moderation.unbridge_user(user, msg, WordLib.flagged_words(msg), "public_chat:#{room_name}")
     end
 
-    blacklisted = User.is_bot?(user) == false and WordLib.blacklisted_phrase?(msg)
+    blacklisted = CacheUser.is_bot?(user) == false and WordLib.blacklisted_phrase?(msg)
 
     if blacklisted do
-      User.shadowban_user(user.id)
+      CacheUser.shadowban_user(user.id)
     end
 
     if allow?(from_id, room_name) do
@@ -183,8 +182,8 @@ defmodule Teiserver.Room do
         nil ->
           nil
 
-        room ->
-          if from_id in room.members do
+        _room ->
+          insert_result =
             if not Enum.member?(@dont_log_room, room_name) do
               Chat.create_room_message(%{
                 content: msg,
@@ -194,28 +193,46 @@ defmodule Teiserver.Room do
               })
             end
 
-            PubSub.broadcast(
-              Central.PubSub,
-              "room:#{room_name}",
-              {:new_message, from_id, room_name, msg}
-            )
-          end
+          message_object =
+            case insert_result do
+              {:ok, message_object} -> message_object
+              _ -> %{}
+            end
+
+          PubSub.broadcast(
+            Teiserver.PubSub,
+            "room_chat:#{room_name}",
+            %{
+              channel: "room_chat",
+              event: :message_received,
+              room_name: room_name,
+              id: Map.get(message_object, :id, nil),
+              content: msg,
+              user_id: from_id
+            }
+          )
+
+          PubSub.broadcast(
+            Teiserver.PubSub,
+            "room:#{room_name}",
+            {:new_message, from_id, room_name, msg}
+          )
       end
     end
   end
 
   @spec send_message_ex(T.userid(), String.t(), String.t()) :: nil | :ok
   def send_message_ex(from_id, room_name, msg) do
-    user = User.get_user_by_id(from_id)
+    user = Account.get_user_by_id(from_id)
 
-    if User.is_bot?(user) == false and WordLib.flagged_words(msg) > 0 do
+    if CacheUser.is_bot?(user) == false and WordLib.flagged_words(msg) > 0 do
       Moderation.unbridge_user(user, msg, WordLib.flagged_words(msg), "public_chat:#{room_name}")
     end
 
-    blacklisted = User.is_bot?(user) == false and WordLib.blacklisted_phrase?(msg)
+    blacklisted = CacheUser.is_bot?(user) == false and WordLib.blacklisted_phrase?(msg)
 
     if blacklisted do
-      User.shadowban_user(user.id)
+      CacheUser.shadowban_user(user.id)
     end
 
     if allow?(from_id, room_name) do
@@ -235,7 +252,7 @@ defmodule Teiserver.Room do
             end
 
             PubSub.broadcast(
-              Central.PubSub,
+              Teiserver.PubSub,
               "room:#{room_name}",
               {:new_message_ex, from_id, room_name, msg}
             )
@@ -247,10 +264,10 @@ defmodule Teiserver.Room do
   @spec allow?(Map.t(), String.t()) :: boolean()
   def allow?(userid, _room_name) do
     cond do
-      User.is_shadowbanned?(userid) ->
+      CacheUser.is_shadowbanned?(userid) ->
         false
 
-      User.is_restricted?(userid, ["All chat", "Room chat"]) ->
+      CacheUser.is_restricted?(userid, ["All chat", "Room chat"]) ->
         false
 
       true ->

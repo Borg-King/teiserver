@@ -2,8 +2,8 @@ defmodule Teiserver.Account.OpenSkillReport do
   require Logger
 
   alias Teiserver.Game.MatchRatingLib
-  alias Central.Repo
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  alias Teiserver.Repo
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   @spec icon() :: String.t()
   def icon(), do: "fa-regular fa-chart-line"

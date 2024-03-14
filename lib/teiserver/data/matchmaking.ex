@@ -36,16 +36,16 @@ end
 
 defmodule Teiserver.Data.Matchmaking do
   require Logger
-  alias Teiserver.{Account, Game, User}
+  alias Teiserver.{Account, Game, CacheUser}
   alias Teiserver.Battle.BalanceLib
   alias Teiserver.Data.{QueueStruct, QueueGroup}
-  alias Teiserver.Game.{QueueWaitServer, QueueMatchServer}
+  alias Teiserver.Game.{QueueWaitServer, QueueRoomServer}
   alias Teiserver.Data.Types, as: T
   alias Phoenix.PubSub
 
   @spec get_queue(Integer.t()) :: QueueStruct.t() | nil
   def get_queue(id) do
-    Central.cache_get(:teiserver_queues, id)
+    Teiserver.cache_get(:teiserver_queues, id)
   end
 
   @spec get_queue_wait_pid(T.queue_id()) :: pid() | nil
@@ -125,7 +125,7 @@ defmodule Teiserver.Data.Matchmaking do
   @spec create_match([QueueGroup.t()], T.queue_id()) :: {pid, String.t()}
   def create_match(group_list, queue_id) do
     PubSub.broadcast(
-      Central.PubSub,
+      Teiserver.PubSub,
       "teiserver_global_matchmaking",
       %{
         channel: "teiserver_global_matchmaking",
@@ -143,7 +143,7 @@ defmodule Teiserver.Data.Matchmaking do
 
     {:ok, pid} =
       DynamicSupervisor.start_child(Teiserver.Game.QueueSupervisor, {
-        QueueMatchServer,
+        QueueRoomServer,
         data: %{
           match_id: match_id,
           queue_id: queue_id,
@@ -156,7 +156,7 @@ defmodule Teiserver.Data.Matchmaking do
 
   @spec get_queue_and_info(T.queue_id()) :: {QueueStruct.t(), Map.t()}
   def get_queue_and_info(id) when is_integer(id) do
-    queue = Central.cache_get(:teiserver_queues, id)
+    queue = Teiserver.cache_get(:teiserver_queues, id)
     info = call_queue_wait(id, :get_info)
     {queue, info}
   end
@@ -175,7 +175,7 @@ defmodule Teiserver.Data.Matchmaking do
   def add_queue(nil), do: {:error, "no queue"}
 
   def add_queue(queue) do
-    Central.cache_update(:lists, :queues, fn value ->
+    Teiserver.cache_update(:lists, :queues, fn value ->
       new_value =
         [queue.id | value]
         |> Enum.uniq()
@@ -210,25 +210,25 @@ defmodule Teiserver.Data.Matchmaking do
 
   @spec update_queue(QueueStruct.t()) :: :ok
   def update_queue(queue) do
-    Central.cache_put(:teiserver_queues, queue.id, queue)
+    Teiserver.cache_put(:teiserver_queues, queue.id, queue)
   end
 
   @spec list_queue_ids :: [non_neg_integer()]
   def list_queue_ids() do
-    Central.cache_get(:lists, :queues)
+    Teiserver.cache_get(:lists, :queues) || []
   end
 
   @spec list_queues :: [QueueStruct.t() | nil]
   def list_queues() do
     list_queue_ids()
-    |> Enum.map(fn queue_id -> Central.cache_get(:teiserver_queues, queue_id) end)
+    |> Enum.map(fn queue_id -> Teiserver.cache_get(:teiserver_queues, queue_id) end)
   end
 
   @spec list_queues([Integer.t()]) :: [QueueStruct.t() | nil]
   def list_queues(id_list) do
     id_list
     |> Enum.map(fn queue_id ->
-      Central.cache_get(:teiserver_queues, queue_id)
+      Teiserver.cache_get(:teiserver_queues, queue_id)
     end)
   end
 
@@ -262,7 +262,7 @@ defmodule Teiserver.Data.Matchmaking do
             any_moderated =
               party.members
               |> Stream.map(fn member_id ->
-                User.is_restricted?(member_id, "Matchmaking")
+                CacheUser.is_restricted?(member_id, "Matchmaking")
               end)
               |> Enum.any?()
 
@@ -277,7 +277,7 @@ defmodule Teiserver.Data.Matchmaking do
             :not_party_leader
           end
 
-        User.is_restricted?(userid, "Matchmaking") ->
+        CacheUser.is_restricted?(userid, "Matchmaking") ->
           :moderated
 
         true ->
@@ -445,7 +445,7 @@ defmodule Teiserver.Data.Matchmaking do
 
   @spec pre_cache_queues :: :ok
   def pre_cache_queues() do
-    Central.cache_insert_new(:lists, :queues, [])
+    Teiserver.cache_insert_new(:lists, :queues, [])
 
     queue_count =
       Game.list_queues(limit: :infinity)

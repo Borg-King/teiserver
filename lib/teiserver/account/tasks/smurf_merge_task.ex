@@ -1,9 +1,10 @@
 defmodule Teiserver.Account.SmurfMergeTask do
-  alias Teiserver.{Account, Game, User}
+  @moduledoc false
+  alias Teiserver.{Account, Game}
   alias Teiserver.Battle.BalanceLib
   require Logger
   alias Teiserver.Data.Types, as: T
-  # alias Central.Repo
+  # alias Teiserver.Repo
 
   @spec perform(T.userid(), T.userid(), map()) :: :ok
   def perform(from_id, to_id, settings) do
@@ -31,7 +32,7 @@ defmodule Teiserver.Account.SmurfMergeTask do
   #     end)
 
   #   Ecto.Multi.new()
-  #     |> Ecto.Multi.insert_all(:insert_all, Central.Account.Report, new_reports)
+  #     |> Ecto.Multi.insert_all(:insert_all, Teiserver.Account.Report, new_reports)
   #     |> Repo.transaction()
 
   #   :ok
@@ -120,7 +121,7 @@ defmodule Teiserver.Account.SmurfMergeTask do
       limit: :infinity
     )
     |> Enum.each(fn %{id: ignorer_id} ->
-      User.ignore_user(ignorer_id, to_id)
+      Account.ignore_user(ignorer_id, to_id)
     end)
 
     :ok

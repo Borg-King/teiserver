@@ -27,7 +27,7 @@
 
         <h4>Listing Text callbacks</h4>
 
-        <table class="table table-sm">
+        <table class="table table-sm table-hover">
           <thead>
             <tr>
               <th colspan="2">Callback</th>
@@ -72,12 +72,14 @@
                   </a>
                 </td>
                 <td>
-                  <a
-                    href={~p"/admin/text_callbacks/#{text_callback.id}/edit"}
-                    class={"btn btn-outline-#{bsname} btn-sm"}
-                  >
-                    <i class="fa-fw fa-regular fa-wrench"></i> Edit
-                  </a>
+                  <%= if allow?(@conn, "Admin") do %>
+                    <a
+                      href={~p"/admin/text_callbacks/#{text_callback.id}/edit"}
+                      class={"btn btn-outline-#{bsname} btn-sm"}
+                    >
+                      <i class="fa-fw fa-regular fa-wrench"></i> Edit
+                    </a>
+                  <% end %>
                 </td>
               </tr>
             <% end %>

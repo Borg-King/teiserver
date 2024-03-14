@@ -4,6 +4,7 @@ defmodule Teiserver.Tachyon.Responses.Account.WhoamiResponse do
   """
 
   alias Teiserver.Data.Types, as: T
+  alias Teiserver.{Account, CacheUser}
 
   @spec generate(T.user(), T.client()) ::
           {T.tachyon_command(), T.tachyon_status(), T.tachyon_object()}
@@ -11,14 +12,14 @@ defmodule Teiserver.Tachyon.Responses.Account.WhoamiResponse do
     object = %{
       "id" => user.id,
       "name" => user.name,
-      "is_bot" => user.bot,
+      "is_bot" => CacheUser.is_bot?(user),
       "clan_id" => user.clan_id,
       "icons" => %{},
       "roles" => [],
       "permissions" => user.permissions,
-      "friends" => user.friends,
-      "friend_requests" => user.friend_requests,
-      "ignores" => user.ignored,
+      "friends" => Account.list_friend_ids_of_user(user.id),
+      "friend_requests" => Account.list_incoming_friend_requests_of_userid(user.id),
+      "ignores" => Account.list_userids_ignored_by_userid(user.id),
       "status" => %{
         "in_game" => client.in_game,
         "away" => client.away,

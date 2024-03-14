@@ -15,10 +15,10 @@ defmodule Teiserver.Account.RetentionRateExport do
     "start_date" => "2023-01-01"
   })
   """
-  alias Central.Helpers.DatePresets
-  alias Teiserver.{Account, Telemetry}
-  alias Central.Helpers.TimexHelper
-  alias Central.Helpers.TimexHelper
+  alias Teiserver.Helper.DatePresets
+  alias Teiserver.{Account, Logging}
+  alias Teiserver.Helper.TimexHelper
+  alias Teiserver.Helper.TimexHelper
   require Logger
 
   @activity_types ~w(total player)
@@ -61,7 +61,7 @@ defmodule Teiserver.Account.RetentionRateExport do
       end
 
     day_logs =
-      Telemetry.list_server_day_logs(
+      Logging.list_user_activity_day_logs(
         search: [start_date: start_date],
         order: "Newest first",
         limit: :infinity
@@ -78,7 +78,7 @@ defmodule Teiserver.Account.RetentionRateExport do
           inserted_after: start_datetime,
           inserted_before: end_datetime,
           verified: true,
-          data_greater_than: {"last_login", "0"},
+          data_greater_than: {"last_login_mins", "0"},
           bot: "Person"
         ],
         select: [:id, :inserted_at],
@@ -199,7 +199,7 @@ defmodule Teiserver.Account.RetentionRateExport do
       @activity_types
       |> Map.new(fn activity ->
         result =
-          log_data["minutes_per_user"][activity]
+          log_data[activity]
           |> Enum.map(fn {str_id, _mins} ->
             if Enum.member?(userids, str_id), do: 1, else: 0
           end)
@@ -212,7 +212,7 @@ defmodule Teiserver.Account.RetentionRateExport do
       @activity_types
       |> Map.new(fn activity ->
         result =
-          log_data["minutes_per_user"][activity]
+          log_data[activity]
           |> Enum.map(fn {str_id, mins} ->
             if Enum.member?(userids, str_id), do: mins, else: 0
           end)

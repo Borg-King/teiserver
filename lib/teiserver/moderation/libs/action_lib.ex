@@ -1,7 +1,9 @@
 defmodule Teiserver.Moderation.ActionLib do
   @moduledoc false
-  use CentralWeb, :library
+  use TeiserverWeb, :library
+  alias Teiserver.{Communication, Moderation}
   alias Teiserver.Moderation.Action
+  alias Teiserver.Helper.TimexHelper
 
   # Functions
   @spec icon :: String.t()
@@ -170,11 +172,11 @@ defmodule Teiserver.Moderation.ActionLib do
 
   def preload(query, preloads) do
     query = if :target in preloads, do: _preload_target(query), else: query
-    query = if :reports in preloads, do: _preload_reports(query), else: query
+    query = if :report_groups in preloads, do: _preload_report_groups(query), else: query
 
     query =
-      if :reports_and_reporters in preloads,
-        do: _preload_reports_and_reporters(query),
+      if :report_group_reports_and_reporters in preloads,
+        do: _preload_report_group_reports_and_reporters(query),
         else: query
 
     query
@@ -187,18 +189,132 @@ defmodule Teiserver.Moderation.ActionLib do
       preload: [target: targets]
   end
 
-  @spec _preload_reports(Ecto.Query.t()) :: Ecto.Query.t()
-  def _preload_reports(query) do
+  @spec _preload_report_groups(Ecto.Query.t()) :: Ecto.Query.t()
+  def _preload_report_groups(query) do
     from actions in query,
-      left_join: reports in assoc(actions, :reports),
-      preload: [reports: reports]
+      left_join: report_groups in assoc(actions, :report_groups),
+      preload: [report_groups: report_groups]
   end
 
-  @spec _preload_reports_and_reporters(Ecto.Query.t()) :: Ecto.Query.t()
-  def _preload_reports_and_reporters(query) do
+  @spec _preload_report_group_reports_and_reporters(Ecto.Query.t()) :: Ecto.Query.t()
+  def _preload_report_group_reports_and_reporters(query) do
     from actions in query,
-      left_join: reports in assoc(actions, :reports),
+      left_join: report_groups in assoc(actions, :report_group),
+      left_join: reports in assoc(report_groups, :reports),
       left_join: reporters in assoc(reports, :reporter),
-      preload: [reports: {reports, reporter: reporters}]
+      preload: [report_group: {report_groups, reports: {reports, reporter: reporters}}]
+  end
+
+  def generate_discord_message_text(nil), do: nil
+
+  def generate_discord_message_text(action) do
+    action =
+      if Ecto.assoc_loaded?(action.target) do
+        action
+      else
+        Teiserver.Moderation.get_action(action.id,
+          preload: [:target]
+        )
+      end
+
+    if action do
+      until =
+        if action.expires do
+          "Until: " <> TimexHelper.date_to_discord_str(action.expires)
+        else
+          "Permanent"
+        end
+
+      restriction_list = action.restrictions |> Enum.join(", ")
+
+      restriction_string =
+        if Enum.count(action.restrictions) > 1 do
+          "Restrictions: #{restriction_list}"
+        else
+          "Restriction: #{restriction_list}"
+        end
+
+      formatted_reason =
+        Regex.replace(~r/https:\/\/discord.gg\/\S+/, action.reason, "--discord-link--")
+
+      [
+        "--------------------------------------------",
+        "`#{action.target.name}` has been moderated.",
+        "Reason: #{formatted_reason}, #{restriction_string}",
+        until
+      ]
+      |> List.flatten()
+      |> Enum.join("\n")
+      |> String.replace("\n\n", "\n")
+    end
+  end
+
+  @spec maybe_create_discord_post(Action.t()) :: any
+  def maybe_create_discord_post(action) do
+    post_to_discord =
+      cond do
+        action.hidden -> false
+        Enum.member?(action.restrictions, "Bridging") -> false
+        Enum.member?(action.restrictions, "Note") -> false
+        action.reason == "Banned (Automod)" -> false
+        true -> true
+      end
+
+    if post_to_discord do
+      message = generate_discord_message_text(action)
+
+      posting_result = Communication.new_discord_message("Public moderation log", message)
+
+      case posting_result do
+        {:ok, %{id: message_id}} ->
+          Moderation.update_action(action, %{discord_message_id: message_id})
+
+        {:error, :discord_disabled} ->
+          nil
+      end
+
+      posting_result
+    else
+      nil
+    end
+  end
+
+  @spec maybe_update_discord_post(Action.t()) :: any
+  def maybe_update_discord_post(action) do
+    post_to_discord =
+      cond do
+        action.hidden -> false
+        Enum.member?(action.restrictions, "Bridging") -> false
+        Enum.member?(action.restrictions, "Note") -> false
+        action.reason == "Banned (Automod)" -> false
+        true -> true
+      end
+
+    cond do
+      post_to_discord == false ->
+        if action.discord_message_id do
+          Communication.delete_discord_message("Public moderation log", action.discord_message_id)
+          Moderation.update_action(action, %{discord_message_id: nil})
+        end
+
+        nil
+
+      action.discord_message_id == nil ->
+        maybe_create_discord_post(action)
+
+      true ->
+        message = generate_discord_message_text(action)
+
+        if message do
+          Communication.edit_discord_message(
+            "Public moderation log",
+            action.discord_message_id,
+            message
+          )
+        else
+          Communication.delete_discord_message("Public moderation log", action.discord_message_id)
+          Moderation.update_action(action, %{discord_message_id: nil})
+        end
+    end
   end
 end

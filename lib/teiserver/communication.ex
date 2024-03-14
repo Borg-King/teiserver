@@ -1,7 +1,11 @@
 defmodule Teiserver.Communication do
+  @moduledoc """
+
+  """
   import Ecto.Query, warn: false
-  alias Central.Helpers.QueryHelpers
-  alias Central.Repo
+  alias Teiserver.Helper.QueryHelpers
+  alias Teiserver.Repo
+  alias Teiserver.Data.Types, as: T
 
   alias Teiserver.Communication.{TextCallback, TextCallbackLib}
 
@@ -17,7 +21,7 @@ defmodule Teiserver.Communication do
     |> TextCallbackLib.search(args[:search])
     |> TextCallbackLib.preload(args[:preload])
     |> TextCallbackLib.order_by(args[:order_by])
-    |> QueryHelpers.select(args[:select])
+    |> QueryHelpers.query_select(args[:select])
   end
 
   @doc """
@@ -67,25 +71,36 @@ defmodule Teiserver.Communication do
     |> Repo.one!()
   end
 
-  # Uncomment this if needed, default files do not need this function
-  # @doc """
-  # Gets a single text_callback.
+  @doc """
+  Gets a single text_callback.
 
-  # Returns `nil` if the TextCallback does not exist.
+  Returns `nil` if the TextCallback does not exist.
 
-  # ## Examples
+  ## Examples
 
-  #     iex> get_text_callback(123)
-  #     %TextCallback{}
+      iex> get_text_callback(123)
+      %TextCallback{}
 
-  #     iex> get_text_callback(456)
-  #     nil
+      iex> get_text_callback(456)
+      nil
 
-  # """
-  # def get_text_callback(id, args \\ []) when not is_list(id) do
-  #   lobby_text_callback(id, args)
-  #   |> Repo.one
-  # end
+  """
+  @spec get_text_callback(Integer.t() | List.t()) :: TextCallback.t()
+  @spec get_text_callback(Integer.t(), List.t()) :: TextCallback.t()
+  def get_text_callback(id) when not is_list(id) do
+    lobby_text_callback(id, [])
+    |> Repo.one()
+  end
+
+  def get_text_callback(args) do
+    lobby_text_callback(nil, args)
+    |> Repo.one()
+  end
+
+  def get_text_callback(id, args) do
+    lobby_text_callback(id, args)
+    |> Repo.one()
+  end
 
   @doc """
   Creates a text_callback.
@@ -169,4 +184,72 @@ defmodule Teiserver.Communication do
 
   @spec lookup_text_callback_from_trigger(String.t()) :: TextCallback.t() | nil
   defdelegate lookup_text_callback_from_trigger(trigger), to: TextCallbackLib
+
+  @spec can_trigger_callback?(non_neg_integer() | TextCallback.t(), non_neg_integer()) ::
+          TextCallback.t() | nil
+  defdelegate can_trigger_callback?(tc_id_or_tc, channel_id), to: TextCallbackLib
+
+  @spec set_last_triggered_time(TextCallback.t(), non_neg_integer()) :: any
+  defdelegate set_last_triggered_time(text_callback, channel_id), to: TextCallbackLib
+
+  # Discord channels
+  alias Teiserver.Communication.{DiscordChannel, DiscordChannelLib}
+
+  @spec list_discord_channels() :: [DiscordChannel]
+  defdelegate list_discord_channels(), to: DiscordChannelLib
+
+  @spec list_discord_channels(list) :: [DiscordChannel]
+  defdelegate list_discord_channels(args), to: DiscordChannelLib
+
+  @spec get_discord_channel!(non_neg_integer()) :: DiscordChannel.t()
+  defdelegate get_discord_channel!(discord_channel_id), to: DiscordChannelLib
+
+  @spec get_discord_channel(non_neg_integer()) :: DiscordChannel.t() | nil
+  defdelegate get_discord_channel(discord_channel_id), to: DiscordChannelLib
+
+  @spec create_discord_channel() :: {:ok, DiscordChannel} | {:error, Ecto.Changeset}
+  defdelegate create_discord_channel(), to: DiscordChannelLib
+
+  @spec create_discord_channel(map) :: {:ok, DiscordChannel} | {:error, Ecto.Changeset}
+  defdelegate create_discord_channel(attrs), to: DiscordChannelLib
+
+  @spec update_discord_channel(DiscordChannel, map) ::
+          {:ok, DiscordChannel} | {:error, Ecto.Changeset}
+  defdelegate update_discord_channel(discord_channel, attrs), to: DiscordChannelLib
+
+  @spec delete_discord_channel(DiscordChannel) :: {:ok, DiscordChannel} | {:error, Ecto.Changeset}
+  defdelegate delete_discord_channel(discord_channel), to: DiscordChannelLib
+
+  @spec change_discord_channel(DiscordChannel) :: Ecto.Changeset
+  defdelegate change_discord_channel(discord_channel), to: DiscordChannelLib
+
+  @spec change_discord_channel(DiscordChannel, map) :: Ecto.Changeset
+  defdelegate change_discord_channel(discord_channel_type, attrs), to: DiscordChannelLib
+
+  @spec pre_cache_discord_channels() :: :ok
+  defdelegate pre_cache_discord_channels(), to: DiscordChannelLib
+
+  @spec new_discord_message(String.t() | non_neg_integer(), String.t()) ::
+          map | nil | {:error, String.t()}
+  defdelegate new_discord_message(channel_id, message), to: DiscordChannelLib
+
+  @spec edit_discord_message(non_neg_integer | String.t(), non_neg_integer, String.t()) ::
+          map | nil | {:error, String.t()}
+  defdelegate edit_discord_message(channel_id, message_id, new_message), to: DiscordChannelLib
+
+  @spec delete_discord_message(non_neg_integer | String.t(), non_neg_integer) ::
+          map | nil | {:error, String.t()}
+  defdelegate delete_discord_message(channel_id, message_id), to: DiscordChannelLib
+
+  @spec send_discord_dm(T.userid(), String.t()) :: map | nil | {:error, String.t()}
+  defdelegate send_discord_dm(userid, message), to: DiscordChannelLib
+
+  @doc """
+  Returns true if we are using discord in this environment and false if we are not.
+  """
+  @spec use_discord?() :: boolean
+  defdelegate use_discord?(), to: DiscordChannelLib
+
+  @spec get_guild_id() :: integer | nil
+  defdelegate get_guild_id(), to: DiscordChannelLib
 end

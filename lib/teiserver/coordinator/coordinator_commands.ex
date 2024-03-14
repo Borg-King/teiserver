@@ -1,7 +1,7 @@
 defmodule Teiserver.Coordinator.CoordinatorCommands do
-  alias Teiserver.{User, Account, Client, Coordinator, Moderation}
-  alias Teiserver.Battle.Lobby
-  alias Central.Helpers.NumberHelper
+  alias Teiserver.{CacheUser, Account, Client, Coordinator, Moderation}
+  alias Teiserver.Lobby
+  alias Teiserver.Helper.NumberHelper
   alias Teiserver.Account.{AccoladeLib, CodeOfConductData}
   alias Teiserver.Coordinator.CoordinatorLib
   alias Teiserver.Config
@@ -28,7 +28,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         true
 
       not Enum.member?(@always_allow ++ @forward_to_consul, cmd.command) ->
-        User.send_direct_message(
+        CacheUser.send_direct_message(
           state.userid,
           cmd.senderid,
           "No command of name '#{cmd.command}'"
@@ -64,7 +64,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
   # Public commands
   @spec do_handle(map(), map()) :: map()
   defp do_handle(%{command: "help", senderid: senderid, remaining: remaining} = cmd, state) do
-    user = User.get_user_by_id(senderid)
+    user = CacheUser.get_user_by_id(senderid)
     host_id = Map.get(cmd, :host_id, nil)
 
     messages =
@@ -91,7 +91,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         }
       })
 
-    host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
+    host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
     url = "https://#{host}/one_time_login/#{code.value}"
 
     Coordinator.send_to_user(senderid, [
@@ -118,31 +118,31 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         }
       })
 
-    host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
+    host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
     url = "https://#{host}/one_time_login/#{code.value}"
 
     msg =
       [
-        "Matchmaking is still in development so please report any bugs in it to Teifion (I'm the one creating it) in the discord.",
+        "Matchmaking is still in development so please report any bugs in it to the devs in the discord.",
         "To join/leave queues you will need to use the website, you can access it with this link - #{url}"
       ]
       |> List.flatten()
 
-    User.send_direct_message(state.userid, senderid, msg)
+    CacheUser.send_direct_message(state.userid, senderid, msg)
 
     state
   end
 
   defp do_handle(%{command: "whoami", senderid: senderid} = _cmd, state) do
-    sender = User.get_user_by_id(senderid)
+    sender = CacheUser.get_user_by_id(senderid)
     stats = Account.get_user_stat_data(senderid)
 
     total_hours = (Map.get(stats, "total_minutes", 0) / 60) |> round
     player_hours = (Map.get(stats, "player_minutes", 0) / 60) |> round
     spectator_hours = (Map.get(stats, "spectator_minutes", 0) / 60) |> round
 
-    host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
-    profile_link = "https://#{host}/teiserver/profile/#{senderid}"
+    host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
+    profile_link = "https://#{host}/profile/#{senderid}"
 
     accolades = AccoladeLib.get_player_accolades(senderid)
 
@@ -198,17 +198,21 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
       |> List.flatten()
       |> Enum.reject(fn l -> l == nil end)
 
-    User.send_direct_message(state.userid, senderid, msg)
+    CacheUser.send_direct_message(state.userid, senderid, msg)
     state
   end
 
   defp do_handle(%{command: "whois", senderid: senderid, remaining: remaining} = _cmd, state) do
-    case User.get_user_by_name(remaining) do
+    case CacheUser.get_user_by_name(remaining) do
       nil ->
-        User.send_direct_message(state.userid, senderid, "Unable to find a user with that name")
+        CacheUser.send_direct_message(
+          state.userid,
+          senderid,
+          "Unable to find a user with that name"
+        )
 
       user ->
-        sender = User.get_user_by_id(senderid)
+        sender = CacheUser.get_user_by_id(senderid)
         stats = Account.get_user_stat_data(user.id)
 
         previous_names =
@@ -240,8 +244,8 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
             ]
           end
 
-        host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
-        profile_link = "https://#{host}/teiserver/profile/#{user.id}"
+        host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
+        profile_link = "https://#{host}/profile/#{user.id}"
 
         ratings =
           Account.list_ratings(
@@ -274,10 +278,10 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         ]
 
         mod_parts =
-          if User.is_moderator?(sender) do
+          if CacheUser.is_moderator?(sender) do
             # player_hours = Map.get(stats, "player_minutes", 0)/60 |> round
             # spectator_hours = Map.get(stats, "spectator_minutes", 0)/60 |> round
-            # rank_time = User.rank_time(user.id)
+            # rank_time = CacheUser.rank_time(user.id)
 
             smurfs =
               Account.smurf_search(user)
@@ -331,7 +335,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
           |> List.flatten()
           |> Enum.reject(fn l -> l == nil end)
 
-        User.send_direct_message(state.userid, senderid, msg)
+        CacheUser.send_direct_message(state.userid, senderid, msg)
     end
 
     state
@@ -354,33 +358,33 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
       end)
 
     if Enum.empty?(messages) do
-      User.send_direct_message(state.userid, senderid, "No matches for '#{remaining}'")
+      CacheUser.send_direct_message(state.userid, senderid, "No matches for '#{remaining}'")
     else
-      User.send_direct_message(state.userid, senderid, messages)
+      CacheUser.send_direct_message(state.userid, senderid, messages)
     end
 
     state
   end
 
   defp do_handle(%{command: "discord", senderid: senderid} = _cmd, state) do
-    sender = User.get_user_by_id(senderid)
+    sender = CacheUser.get_user_by_id(senderid)
 
     if sender.discord_id != nil do
-      User.send_direct_message(
+      CacheUser.send_direct_message(
         state.userid,
         senderid,
-        "You already have a discord account linked; the discord link is: #{Application.get_env(:central, Teiserver)[:discord]}"
+        "You already have a discord account linked; the discord link is: #{Application.get_env(:teiserver, Teiserver)[:discord]}"
       )
     else
       code = (:rand.uniform(899_999) + 100_000) |> to_string
-      Central.cache_put(:discord_bridge_account_codes, senderid, code)
+      Teiserver.cache_put(:discord_bridge_account_codes, senderid, code)
 
-      User.send_direct_message(state.userid, senderid, [
+      CacheUser.send_direct_message(state.userid, senderid, [
         @splitter,
         "To link your discord account, message the the discord bot (Teiserver Bridge) with the message",
         "$discord #{senderid}-#{code}",
         "This code will expire after 5 minutes",
-        "The discord link is: #{Application.get_env(:central, Teiserver)[:discord]}"
+        "The discord link is: #{Application.get_env(:teiserver, Teiserver)[:discord]}"
       ])
     end
 
@@ -391,7 +395,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
     do: do_handle(%{cmd | command: "mute"}, state)
 
   defp do_handle(%{command: "mute", senderid: senderid, remaining: remaining} = _cmd, state) do
-    case User.get_user_by_name(remaining) do
+    case CacheUser.get_user_by_name(remaining) do
       nil ->
         Coordinator.send_to_user(
           senderid,
@@ -399,10 +403,10 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         )
 
       user ->
-        if User.is_moderator?(user) do
+        if CacheUser.is_moderator?(user) do
           Coordinator.send_to_user(senderid, "You cannot block moderators.")
         else
-          User.ignore_user(senderid, user.id)
+          Account.ignore_user(senderid, user.id)
 
           Coordinator.send_to_user(
             senderid,
@@ -418,7 +422,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
     do: do_handle(%{cmd | command: "unmute"}, state)
 
   defp do_handle(%{command: "unmute", senderid: senderid, remaining: remaining} = _cmd, state) do
-    case User.get_user_by_name(remaining) do
+    case CacheUser.get_user_by_name(remaining) do
       nil ->
         Coordinator.send_to_user(
           senderid,
@@ -426,7 +430,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         )
 
       user ->
-        User.unignore_user(senderid, user.id)
+        Account.reset_relationship_state(senderid, user.id)
         Coordinator.send_to_user(senderid, "#{user.name} is now un-ignored.")
     end
 
@@ -443,9 +447,14 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
     end)
     |> Enum.uniq()
     |> Enum.reduce(nil, fn target, party_id ->
-      case User.get_userid(target) do
+      case CacheUser.get_userid(target) do
         nil ->
-          User.send_direct_message(state.userid, senderid, "Unable to find a user '#{target}'")
+          CacheUser.send_direct_message(
+            state.userid,
+            senderid,
+            "Unable to find a user '#{target}'"
+          )
+
           party_id
 
         target_id ->
@@ -479,7 +488,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
     end)
     |> Enum.uniq()
     |> Enum.reduce(nil, fn target, _ ->
-      case User.get_userid(target) do
+      case CacheUser.get_userid(target) do
         nil ->
           :ok
 
@@ -508,7 +517,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
         metadata: %{ip: client.ip}
       })
 
-    host = Application.get_env(:central, CentralWeb.Endpoint)[:url][:host]
+    host = Application.get_env(:teiserver, TeiserverWeb.Endpoint)[:url][:host]
     url = "https://#{host}/one_time_login/#{code.value}"
 
     Coordinator.send_to_user(
@@ -521,7 +530,7 @@ defmodule Teiserver.Coordinator.CoordinatorCommands do
 
   # Moderator commands
   defp do_handle(%{command: command, senderid: senderid} = _cmd, state) do
-    User.send_direct_message(
+    CacheUser.send_direct_message(
       state.userid,
       senderid,
       "I don't have a handler for the command '#{command}'"

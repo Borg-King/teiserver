@@ -1,12 +1,13 @@
 defmodule Teiserver.Coordinator.ConsulCommands do
+  @moduledoc false
   require Logger
   alias Teiserver.Config
   alias Teiserver.Coordinator.{ConsulServer, RikerssMemes}
-  alias Teiserver.{Account, Battle, Coordinator, User, Client}
-  alias Teiserver.Battle.{Lobby, LobbyChat}
+  alias Teiserver.{Account, Battle, Lobby, Coordinator, CacheUser, Client, Telemetry}
+  alias Teiserver.Lobby.{ChatLib, LobbyLib}
   alias Teiserver.Chat.WordLib
   alias Teiserver.Data.Types, as: T
-  import Central.Helpers.NumberHelper, only: [int_parse: 1, round: 2]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1, round: 2]
 
   @doc """
     Command has structure:
@@ -18,7 +19,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     }
   """
   @splitter "---------------------------"
-  @split_delay 30_000
+  @split_delay 60_000
   @spec handle_command(Map.t(), Map.t()) :: Map.t()
   @default_ban_reason "Banned"
 
@@ -40,7 +41,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
         pos ->
           if Enum.member?(state.low_priority_join_queue, senderid) do
-            "You are at position #{pos + 1} but in the low prority queue so other users may be added in front of you"
+            "You are at position #{pos + 1} but in the low priority queue so other users may be added in front of you"
           else
             "You are at position #{pos + 1} in the queue"
           end
@@ -48,7 +49,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     queue_string =
       queue
-      |> Enum.map_join(", ", &User.get_username/1)
+      |> Enum.map_join(", ", &CacheUser.get_username/1)
 
     queue_size = Enum.count(queue)
 
@@ -62,12 +63,12 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           "Nobody is bossed"
 
         [boss_id] ->
-          "Host boss is: #{User.get_username(boss_id)}"
+          "Host boss is: #{CacheUser.get_username(boss_id)}"
 
         boss_ids ->
           boss_names =
             boss_ids
-            |> Enum.map_join(", ", fn b -> User.get_username(b) end)
+            |> Enum.map_join(", ", fn b -> CacheUser.get_username(b) end)
 
           "Host bosses are: #{boss_names}"
       end
@@ -148,6 +149,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         welcome_message,
         "Currently #{player_count} players",
         "Team size and count are: #{state.host_teamsize} and #{state.host_teamcount}",
+        "Balance algorithm is: #{state.balance_algorithm}",
         boss_string,
         tourney_mode,
         "Maximum allowed number of players is #{max_player_count} (Host = #{state.host_teamsize * state.host_teamcount}, Coordinator = #{state.player_limit})",
@@ -176,7 +178,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   end
 
   def handle_command(%{command: "roll", remaining: remaining, senderid: senderid} = _cmd, state) do
-    username = User.get_username(senderid)
+    username = CacheUser.get_username(senderid)
 
     dice_regex = Regex.run(~r/^(\d+)[dD](\d+)$/, remaining)
     max_format = Regex.run(~r/^(\d+)$/, remaining)
@@ -193,7 +195,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           |> Enum.map(fn _ -> :rand.uniform(s_dice) end)
           |> Enum.sum()
 
-        LobbyChat.say(
+        ChatLib.say(
           state.coordinator_id,
           "#{username} rolled #{n_dice}D#{s_dice} and got a result of: #{result}",
           state.lobby_id
@@ -206,13 +208,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         if nmax > 0 do
           result = :rand.uniform(nmax)
 
-          LobbyChat.say(
+          ChatLib.say(
             state.coordinator_id,
             "#{username} rolled for a number between 1 and #{nmax}, they got: #{result}",
             state.lobby_id
           )
         else
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "Format not recognised, please consult the help for this command for more information.",
@@ -228,13 +230,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         if nmax > nmin and nmin > 0 do
           result = nmin + :rand.uniform(nmax - nmin)
 
-          LobbyChat.say(
+          ChatLib.say(
             state.coordinator_id,
             "#{username} rolled for a number between #{nmin} and #{nmax}, they got: #{result}",
             state.lobby_id
           )
         else
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "Format not recognised, please consult the help for this command for more information.",
@@ -243,7 +245,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         end
 
       true ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "Format not recognised, please consult the help for this command for more information.",
@@ -258,7 +260,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     do: handle_command(Map.put(cmd, :command, "jazlobby"), state)
 
   def handle_command(%{command: "jazlobby", senderid: senderid}, state) do
-    LobbyChat.say(
+    ChatLib.say(
       senderid,
       "You can test out the new client at https://github.com/beyond-all-reason/bar-lobby/releases/latest",
       state.lobby_id
@@ -269,7 +271,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{command: "tournament", senderid: senderid, remaining: rem} = cmd, state) do
     if Config.get_site_config_cache("teiserver.Allow tournament command") do
-      if User.has_any_role?(senderid, [
+      if CacheUser.has_any_role?(senderid, [
            "Moderator",
            "Caster",
            "Tournament player",
@@ -281,13 +283,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           ConsulServer.say_command(cmd, state)
         else
           Battle.update_lobby_values(state.lobby_id, %{tournament: true})
-          # LobbyChat.say(senderid, "!preset tourney", state.lobby_id)
+          # ChatLib.say(senderid, "!preset tourney", state.lobby_id)
           send(self(), :recheck_membership)
           state = %{state | tournament_lobby: true}
           ConsulServer.say_command(cmd, state)
         end
       else
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "Only casters, tournament players and moderators can set tournament mode.",
@@ -299,7 +301,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     else
       Battle.update_lobby_values(state.lobby_id, %{tournament: false})
 
-      LobbyChat.sayprivateex(
+      ChatLib.sayprivateex(
         state.coordinator_id,
         senderid,
         "Tournament mode has been removed from this lobby.",
@@ -337,9 +339,9 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         |> Enum.sort_by(fn {_userid, seconds_ago} -> seconds_ago end, &<=/2)
         |> Enum.map(fn {userid, seconds_ago} ->
           if seconds_ago > max_diff_s do
-            "#{User.get_username(userid)} is almost certainly afk"
+            "#{CacheUser.get_username(userid)} is almost certainly afk"
           else
-            "#{User.get_username(userid)} last seen #{seconds_ago}s ago"
+            "#{CacheUser.get_username(userid)} last seen #{seconds_ago}s ago"
           end
         end)
 
@@ -364,7 +366,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{split: nil} = state
       ) do
     ConsulServer.say_command(cmd, state)
-    sender_name = User.get_username(senderid)
+    sender_name = CacheUser.get_username(senderid)
 
     min_players =
       case String.trim(rem) do
@@ -378,7 +380,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           |> max(1)
       end
 
-    LobbyChat.sayex(
+    ChatLib.sayex(
       state.coordinator_id,
       "Split lobby sequence started ($y to move, $n to cancel, $follow <name> to follow user)",
       state.lobby_id
@@ -386,7 +388,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     Lobby.list_lobby_players!(state.lobby_id)
     |> Enum.each(fn playerid ->
-      User.send_direct_message(state.coordinator_id, playerid, [
+      CacheUser.send_direct_message(state.coordinator_id, playerid, [
         @splitter,
         "#{sender_name} is moving to a new lobby, to follow them say $y.",
         "If you want to follow someone else then say $follow <name> and you will follow that user.",
@@ -396,7 +398,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       ])
     end)
 
-    User.send_direct_message(state.coordinator_id, senderid, [
+    CacheUser.send_direct_message(state.coordinator_id, senderid, [
       "Splitlobby sequence started. If you stay in this lobby you will be moved to a random empty lobby.",
       "If you choose a lobby yourself then anybody voting yes will follow you to that lobby.",
       @splitter
@@ -418,7 +420,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   end
 
   def handle_command(%{command: "splitlobby", senderid: senderid} = _cmd, state) do
-    LobbyChat.sayprivateex(
+    ChatLib.sayprivateex(
       state.coordinator_id,
       senderid,
       "A split is already underway, you cannot start a new one yet",
@@ -480,7 +482,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     if balance do
       moderator_messages =
-        if User.is_moderator?(senderid) do
+        if CacheUser.is_moderator?(senderid) do
           time_taken =
             cond do
               balance.time_taken < 1000 ->
@@ -548,8 +550,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       client == nil ->
         state
 
-      User.is_restricted?(senderid, ["Game queue"]) ->
-        LobbyChat.sayprivateex(
+      CacheUser.is_restricted?(senderid, ["Game queue"]) ->
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "You are restricted from joining from joining the queue",
@@ -559,7 +561,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         state
 
       client.player ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "You are already a player, you can't join the queue!",
@@ -571,7 +573,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       Enum.member?(get_queue(state), senderid) ->
         pos = get_queue_position(get_queue(state), senderid) + 1
 
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "You were already in the join-queue at position #{pos}. Use $status to check on the queue and $leaveq to leave it.",
@@ -584,7 +586,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         send(self(), :queue_check)
 
         new_state =
-          if User.is_restricted?(senderid, ["Low priority"]) do
+          if CacheUser.is_restricted?(senderid, ["Low priority"]) do
             %{state | low_priority_join_queue: state.low_priority_join_queue ++ [senderid]}
           else
             %{state | join_queue: state.join_queue ++ [senderid]}
@@ -595,15 +597,15 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         new_queue = get_queue(new_state)
         pos = get_queue_position(new_queue, senderid) + 1
 
-        if User.is_restricted?(senderid, ["Low priority"]) do
-          LobbyChat.sayprivateex(
+        if CacheUser.is_restricted?(senderid, ["Low priority"]) do
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "You are now in the low priority join-queue at position #{pos}, this means you will be added to the game after normal-priority members. Use $status to check on the queue.",
             state.lobby_id
           )
         else
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "You are now in the join-queue at position #{pos}. Use $status to check on the queue.",
@@ -617,7 +619,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{command: "leaveq", senderid: senderid}, state) do
     if Enum.member?(get_queue(state), senderid) do
-      LobbyChat.sayprivateex(
+      ChatLib.sayprivateex(
         state.coordinator_id,
         senderid,
         "You have been removed from the join queue",
@@ -638,7 +640,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "password?", senderid: senderid}, state) do
     case Battle.get_lobby(state.lobby_id) do
       %{passworded: false} ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "This lobby has no password set",
@@ -646,7 +648,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         )
 
       %{password: password} ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "The lobby password is currently: #{password}",
@@ -658,11 +660,45 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   end
 
   #################### Boss
+  def handle_command(%{command: "balancemode", remaining: remaining, senderid: senderid}, state) do
+    remaining =
+      remaining
+      |> String.downcase()
+      |> String.trim()
+
+    allowed_choices =
+      if CacheUser.is_moderator?(senderid) do
+        Teiserver.Battle.BalanceLib.algorithm_modules() |> Map.keys()
+      else
+        ~w(loser_picks cheeky_switcher_smart)
+      end
+
+    if Enum.member?(allowed_choices, remaining) do
+      ChatLib.say(
+        state.coordinator_id,
+        "Balance mode set to #{remaining}",
+        state.lobby_id
+      )
+
+      Coordinator.cast_balancer(state.lobby_id, {:set_algorithm, remaining})
+      %{state | balance_algorithm: remaining}
+    else
+      Lobby.sayprivateex(
+        state.coordinator_id,
+        senderid,
+        "No balancemode of #{remaining}, options are: #{allowed_choices |> Enum.join(", ")}",
+        state.lobby_id
+      )
+
+      state
+    end
+  end
+
   def handle_command(%{command: "gatekeeper", remaining: mode, senderid: senderid} = cmd, state) do
     state =
       case mode do
         "friends" ->
-          LobbyChat.say(
+          ChatLib.say(
             state.coordinator_id,
             "Gatekeeper mode set to friends, only friends of a player can join the lobby",
             state.lobby_id
@@ -671,7 +707,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           %{state | gatekeeper: :friends}
 
         "friendsplay" ->
-          LobbyChat.say(
+          ChatLib.say(
             state.coordinator_id,
             "Gatekeeper mode set to friendsplay, only friends of a player can play in the lobby (anybody can join)",
             state.lobby_id
@@ -680,11 +716,11 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           %{state | gatekeeper: :friendsplay}
 
         "default" ->
-          LobbyChat.say(state.coordinator_id, "Gatekeeper reset", state.lobby_id)
+          ChatLib.say(state.coordinator_id, "Gatekeeper reset", state.lobby_id)
           %{state | gatekeeper: :default}
 
         _ ->
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "No gatekeeper of that type (accepted types are: friends, friendsplay)",
@@ -718,58 +754,15 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     ConsulServer.say_command(cmd, new_state)
   end
 
-  # TODO: depreciate these
-  def handle_command(%{command: "resetplaylevels", senderid: senderid} = cmd, state) do
-    LobbyChat.sayprivateex(
-      state.coordinator_id,
-      senderid,
-      "This command is being depreciated in favour of resetratinglevels, it will stop working soon",
-      state.lobby_id
-    )
-
-    handle_command(Map.put(cmd, :command, "resetratinglevels"), state)
-  end
-
-  def handle_command(%{command: "minplaylevel", senderid: senderid} = cmd, state) do
-    LobbyChat.sayprivateex(
-      state.coordinator_id,
-      senderid,
-      "This command is being depreciated in favour of minratinglevel, it will stop working soon",
-      state.lobby_id
-    )
-
-    handle_command(Map.put(cmd, :command, "minratinglevel"), state)
-  end
-
-  def handle_command(%{command: "maxplaylevel", senderid: senderid} = cmd, state) do
-    LobbyChat.sayprivateex(
-      state.coordinator_id,
-      senderid,
-      "This command is being depreciated in favour of maxratinglevel, it will stop working soon",
-      state.lobby_id
-    )
-
-    handle_command(Map.put(cmd, :command, "maxratinglevel"), state)
-  end
-
-  def handle_command(%{command: "setplaylevels", senderid: senderid} = cmd, state) do
-    LobbyChat.sayprivateex(
-      state.coordinator_id,
-      senderid,
-      "This command is being depreciated in favour of setratinglevels, it will stop working soon",
-      state.lobby_id
-    )
-
-    handle_command(Map.put(cmd, :command, "setratinglevels"), state)
-  end
-
   def handle_command(%{command: "resetratinglevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_rating_to_play: 0, maximum_rating_to_play: 1000}
   end
 
   def handle_command(%{command: "minratinglevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_rating_to_play: 0}
   end
 
@@ -777,31 +770,43 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "minratinglevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    case Integer.parse(remaining |> String.trim()) do
-      :error ->
-        Lobby.sayprivateex(
-          state.coordinator_id,
-          senderid,
-          [
-            "Unable to turn '#{remaining}' into an integer"
-          ],
-          state.lobby_id
-        )
+    if allowed_to_set_rating_limit?(state) do
+      case Integer.parse(remaining |> String.trim()) do
+        :error ->
+          Lobby.sayprivateex(
+            state.coordinator_id,
+            senderid,
+            [
+              "Unable to turn '#{remaining}' into an integer"
+            ],
+            state.lobby_id
+          )
 
-        state
-
-      {level, _} ->
-        ConsulServer.say_command(cmd, state)
-
-        %{
           state
-          | minimum_rating_to_play: level |> max(0) |> min(state.maximum_rating_to_play - 1)
-        }
+
+        {level, _} ->
+          ConsulServer.say_command(cmd, state)
+          LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+
+          %{
+            state
+            | minimum_rating_to_play: level |> max(0) |> min(state.maximum_rating_to_play - 1)
+          }
+      end
+    else
+      Lobby.sayex(
+        state.coordinator_id,
+        "You cannot set a rating limit if all are welcome to the game",
+        state.lobby_id
+      )
+
+      state
     end
   end
 
   def handle_command(%{command: "maxratinglevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | maximum_rating_to_play: 1000}
   end
 
@@ -809,26 +814,37 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{command: "maxratinglevel", remaining: remaining, senderid: senderid} = cmd,
         state
       ) do
-    case Integer.parse(remaining |> String.trim()) do
-      :error ->
-        Lobby.sayprivateex(
-          state.coordinator_id,
-          senderid,
-          [
-            "Unable to turn '#{remaining}' into an integer"
-          ],
-          state.lobby_id
-        )
+    if allowed_to_set_rating_limit?(state) do
+      case Integer.parse(remaining |> String.trim()) do
+        :error ->
+          Lobby.sayprivateex(
+            state.coordinator_id,
+            senderid,
+            [
+              "Unable to turn '#{remaining}' into an integer"
+            ],
+            state.lobby_id
+          )
 
-        state
-
-      {level, _} ->
-        ConsulServer.say_command(cmd, state)
-
-        %{
           state
-          | maximum_rating_to_play: level |> min(1000) |> max(state.minimum_rating_to_play + 1)
-        }
+
+        {level, _} ->
+          ConsulServer.say_command(cmd, state)
+          LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
+
+          %{
+            state
+            | maximum_rating_to_play: level |> min(1000) |> max(state.minimum_rating_to_play + 1)
+          }
+      end
+    else
+      Lobby.sayex(
+        state.coordinator_id,
+        "You cannot set a rating limit if all are welcome to the game",
+        state.lobby_id
+      )
+
+      state
     end
   end
 
@@ -864,16 +880,27 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             state
 
           {{min_level_o, _}, {max_level_o, _}} ->
-            min_level = min(min_level_o, max_level_o)
-            max_level = max(min_level_o, max_level_o)
+            if allowed_to_set_rating_limit?(state) do
+              min_level = min(min_level_o, max_level_o)
+              max_level = max(min_level_o, max_level_o)
 
-            ConsulServer.say_command(cmd, state)
+              ConsulServer.say_command(cmd, state)
+              LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
-            %{
+              %{
+                state
+                | minimum_rating_to_play: max(min_level, 0),
+                  maximum_rating_to_play: min(max_level, 1000)
+              }
+            else
+              Lobby.sayex(
+                state.coordinator_id,
+                "You cannot set a rating limit if all are welcome to the game",
+                state.lobby_id
+              )
+
               state
-              | minimum_rating_to_play: max(min_level, 0),
-                maximum_rating_to_play: min(max_level, 1000)
-            }
+            end
         end
 
       _ ->
@@ -892,11 +919,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{command: "resetranklevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_rank_to_play: 0, maximum_rank_to_play: 1000}
   end
 
   def handle_command(%{command: "minranklevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_rank_to_play: 0}
   end
 
@@ -919,12 +948,14 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       {level, _} ->
         ConsulServer.say_command(cmd, state)
+        LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
         %{state | minimum_rank_to_play: level |> max(0) |> min(state.maximum_rank_to_play - 1)}
     end
   end
 
   def handle_command(%{command: "maxranklevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | maximum_rank_to_play: 1000}
   end
 
@@ -947,6 +978,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       {level, _} ->
         ConsulServer.say_command(cmd, state)
+        LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
         %{state | maximum_rank_to_play: level |> min(1000) |> max(state.minimum_rank_to_play + 1)}
     end
   end
@@ -987,6 +1019,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             max_level = max(min_level_o, max_level_o)
 
             ConsulServer.say_command(cmd, state)
+            LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
             %{
               state
@@ -1011,11 +1044,13 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{command: "resetuncertaintylevels", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_uncertainty_to_play: 0, maximum_uncertainty_to_play: 1000}
   end
 
   def handle_command(%{command: "minuncertaintylevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | minimum_uncertainty_to_play: 0}
   end
 
@@ -1038,6 +1073,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       {level, _} ->
         ConsulServer.say_command(cmd, state)
+        LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
         %{
           state
@@ -1049,6 +1085,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{command: "maxuncertaintylevel", remaining: ""} = cmd, state) do
     ConsulServer.say_command(cmd, state)
+    LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
     %{state | maximum_uncertainty_to_play: 1000}
   end
 
@@ -1071,6 +1108,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       {level, _} ->
         ConsulServer.say_command(cmd, state)
+        LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
         %{
           state
@@ -1116,6 +1154,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
             max_level = max(min_level_o, max_level_o)
 
             ConsulServer.say_command(cmd, state)
+            LobbyLib.cast_lobby(state.lobby_id, :refresh_name)
 
             %{
               state
@@ -1164,7 +1203,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           "default"
 
         _ ->
-          LobbyChat.sayprivateex(
+          ChatLib.sayprivateex(
             state.coordinator_id,
             senderid,
             "Shuffle types are party, friends, contributor, dev, admin, all and default; using 'default'",
@@ -1212,7 +1251,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           )
 
         "friends" ->
-          sender_friends = [senderid | User.get_user_by_id(senderid) |> Map.get(:friends)]
+          sender_friends = [senderid | CacheUser.get_user_by_id(senderid) |> Map.get(:friends)]
 
           all_possible_clients
           |> Enum.group_by(
@@ -1228,7 +1267,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           all_possible_clients
           |> Enum.group_by(
             fn %{userid: userid} ->
-              User.has_any_role?(userid, "Contributor")
+              CacheUser.has_any_role?(userid, "Contributor")
             end,
             fn %{userid: userid} ->
               userid
@@ -1239,7 +1278,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           all_possible_clients
           |> Enum.group_by(
             fn %{userid: userid} ->
-              User.has_any_role?(userid, "Core")
+              CacheUser.has_any_role?(userid, "Core")
             end,
             fn %{userid: userid} ->
               userid
@@ -1250,7 +1289,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           all_possible_clients
           |> Enum.group_by(
             fn %{userid: userid} ->
-              User.has_any_role?(userid, "Admin")
+              CacheUser.has_any_role?(userid, "Admin")
             end,
             fn %{userid: userid} ->
               userid
@@ -1286,7 +1325,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
     sender_name = Account.get_username_by_id(senderid)
 
-    LobbyChat.say(
+    ChatLib.say(
       state.coordinator_id,
       "#{sender_name} shuffled the players using mode: #{mode}",
       state.lobby_id
@@ -1296,37 +1335,6 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   end
 
   #################### Host and Moderator
-  def handle_command(%{command: "balancemode", remaining: remaining, senderid: senderid}, state) do
-    new_mode =
-      case remaining do
-        "forceparty" ->
-          :forceparty
-
-        "loser_picks" ->
-          :loser_picks
-
-        _ ->
-          Lobby.sayprivateex(
-            state.coordinator_id,
-            senderid,
-            "No balancemode of #{remaining}, options are: loser_picks, forceparty",
-            state.lobby_id
-          )
-
-          :loser_picks
-      end
-
-    LobbyChat.say(
-      state.coordinator_id,
-      "Balance mode set to #{new_mode}",
-      state.lobby_id
-    )
-
-    Coordinator.cast_balancer(state.lobby_id, {:set_algorithm, new_mode})
-
-    state
-  end
-
   def handle_command(%{command: "lock", remaining: remaining, senderid: senderid} = cmd, state) do
     new_locks =
       case get_lock(remaining) do
@@ -1373,6 +1381,19 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     %{state | locks: new_locks}
   end
 
+  # Used for some hailstorm tests for now
+  def handle_command(%{command: "makebalance"} = cmd, state) do
+    Coordinator.call_balancer(state.lobby_id, {
+      :make_balance,
+      2,
+      []
+    })
+
+    ConsulServer.say_command(cmd, state)
+
+    state
+  end
+
   def handle_command(%{command: "specunready"} = cmd, state) do
     battle = Lobby.get_lobby(state.lobby_id)
 
@@ -1381,7 +1402,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       client = Account.get_client_by_id(player_id)
 
       if client.ready == false and client.player == true do
-        User.ring(player_id, state.coordinator_id)
+        CacheUser.ring(player_id, state.coordinator_id)
         Lobby.force_change_client(state.coordinator_id, player_id, %{player: false})
       end
     end)
@@ -1392,12 +1413,30 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   def handle_command(%{command: "rename", remaining: new_name, senderid: senderid} = cmd, state) do
     new_name = String.trim(new_name)
 
+    stripped_name =
+      case Regex.run(~r/^[a-zA-Z0-9_\-\[\] \<\>\+\|:]+$/, new_name) do
+        [s] -> s
+        _ -> ""
+      end
+
     lobby = Lobby.get_lobby(state.lobby_id)
+
+    not_all_welcome =
+      cond do
+        state.maximum_rating_to_play < 1000 -> true
+        state.minimum_rating_to_play > 0 -> true
+        true -> false
+      end
+
+    starts_with_lobby_policy =
+      new_name
+      |> String.downcase()
+      |> String.starts_with?("preset")
 
     cond do
       new_name == "" ->
-        Lobby.rename_lobby(state.lobby_id, lobby.name, false)
-        :ok
+        Battle.rename_lobby(state.lobby_id, lobby.name, nil)
+        state
 
       WordLib.flagged_words(new_name) > 0 ->
         Lobby.sayex(
@@ -1406,7 +1445,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           state.lobby_id
         )
 
-        :ok
+        state
 
       state.lobby_policy_id != nil ->
         Lobby.sayex(
@@ -1415,10 +1454,51 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           state.lobby_id
         )
 
-        :ok
+        state
+
+      # String.length(new_name) > 20 ->
+      #   Lobby.sayex(
+      #     state.coordinator_id,
+      #     "That name (#{new_name}) is too long",
+      #     state.lobby_id
+      #   )
+      #   state
+
+      lobby.lobby_policy_id && starts_with_lobby_policy ->
+        Lobby.sayex(
+          state.coordinator_id,
+          "This is not a server managed lobby, you cannot use that name",
+          state.lobby_id
+        )
+
+        state
+
+      not_all_welcome && allwelcome_name?(stripped_name) ->
+        Lobby.sayex(
+          state.coordinator_id,
+          "You cannot declare a lobby to be welcome to all if there is a rating limit",
+          state.lobby_id
+        )
+
+        state
+
+      new_name != stripped_name ->
+        Lobby.sayex(
+          state.coordinator_id,
+          "That name contains one or more invalid characters (alphanumeric, spaces and some special characters allowed)",
+          state.lobby_id
+        )
+
+        state
 
       senderid != lobby.founder_id ->
-        Lobby.rename_lobby(state.lobby_id, new_name, true)
+        # We have to do this so we don't block the get_state call from the LobbyServer
+        # when it tries to query the rating values
+        spawn(fn ->
+          :timer.sleep(500)
+          Battle.rename_lobby(state.lobby_id, new_name, senderid)
+        end)
+
         ConsulServer.say_command(cmd, state)
 
         downcase_name = new_name |> String.downcase()
@@ -1438,14 +1518,15 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           )
         end
 
-      lobby.consul_rename ->
-        :ok
+        state
+
+      lobby.player_rename ->
+        state
 
       true ->
-        Lobby.rename_lobby(state.lobby_id, new_name, false)
+        Battle.rename_lobby(state.lobby_id, new_name, nil)
+        state
     end
-
-    state
   end
 
   #################### Moderator only
@@ -1460,7 +1541,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         %{state | player_limit: abs(new_limit)}
 
       _ ->
-        LobbyChat.sayprivateex(
+        ChatLib.sayprivateex(
           state.coordinator_id,
           senderid,
           "Unable to convert #{value_str} into an integer",
@@ -1479,7 +1560,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       client = Client.get_client_by_id(player_id)
 
       if client.ready == false and client.player == true do
-        User.ring(player_id, state.coordinator_id)
+        CacheUser.ring(player_id, state.coordinator_id)
         Lobby.force_change_client(state.coordinator_id, player_id, %{ready: true})
       end
     end)
@@ -1493,7 +1574,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         ConsulServer.say_command(%{cmd | error: "no user found"}, state)
 
       player_id ->
-        User.ring(player_id, state.coordinator_id)
+        CacheUser.ring(player_id, state.coordinator_id)
         Lobby.force_change_client(state.coordinator_id, player_id, %{ready: true})
         ConsulServer.say_command(cmd, state)
     end
@@ -1546,9 +1627,9 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       afk_check_list
       |> Enum.each(fn userid ->
-        User.ring(userid, state.coordinator_id)
+        CacheUser.ring(userid, state.coordinator_id)
 
-        User.send_direct_message(
+        CacheUser.send_direct_message(
           state.coordinator_id,
           userid,
           "The lobby you are in is conducting an AFK check, please respond with 'hello' here to show you are not afk or just type something into the lobby chat."
@@ -1582,7 +1663,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       target_id ->
         ConsulServer.say_command(cmd, state)
-        sender_name = User.get_username(senderid)
+        sender_name = CacheUser.get_username(senderid)
 
         Lobby.sayex(
           state.coordinator_id,
@@ -1687,7 +1768,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     end
   end
 
-  def handle_command(%{command: "forceparty"}, state) do
+  def handle_command(%{command: "force_party"}, state) do
     # Forces parties to always be used where possible
     [
       {:max_deviation, 1000},
@@ -1749,6 +1830,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         new_timeouts = Map.put(state.timeouts, target_id, timeout)
 
         Lobby.kick_user_from_battle(target_id, state.lobby_id)
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(target_id, match_id, "consul.timeout_command")
 
         ConsulServer.say_command(cmd, state)
 
@@ -1764,6 +1847,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
       target_id ->
         Lobby.kick_user_from_battle(target_id, state.lobby_id)
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(target_id, match_id, "consul.lobbykick_command")
 
         ConsulServer.say_command(cmd, state)
     end
@@ -1782,6 +1867,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
         new_bans = Map.put(state.bans, target_id, ban)
 
         Lobby.kick_user_from_battle(target_id, state.lobby_id)
+        match_id = Battle.get_lobby_match_id(state.lobby_id)
+        Telemetry.log_simple_lobby_event(target_id, match_id, "consul.lobbyban_command")
 
         ConsulServer.say_command(cmd, state)
 
@@ -1798,6 +1885,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       end
 
     ConsulServer.say_command(cmd, state)
+    match_id = Battle.get_lobby_match_id(state.lobby_id)
 
     String.split(targets, " ")
     |> Enum.reduce(state, fn target, acc ->
@@ -1809,6 +1897,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
           ban = new_ban(%{level: :banned, by: cmd.senderid, reason: reason}, acc)
           new_bans = Map.put(acc.bans, target_id, ban)
           Lobby.kick_user_from_battle(target_id, acc.lobby_id)
+          Telemetry.log_simple_lobby_event(target_id, match_id, "consul.lobbybanmult_command")
 
           %{acc | bans: new_bans}
           |> ConsulServer.broadcast_update("ban")
@@ -1857,7 +1946,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
     if not Enum.empty?(msg) do
       Lobby.list_lobby_players!(state.lobby_id)
       |> Enum.each(fn playerid ->
-        User.send_direct_message(state.coordinator_id, playerid, msg)
+        CacheUser.send_direct_message(state.coordinator_id, playerid, msg)
       end)
     end
 
@@ -1865,7 +1954,7 @@ defmodule Teiserver.Coordinator.ConsulCommands do
   end
 
   def handle_command(%{command: "reset"} = _cmd, state) do
-    Battle.update_lobby_values(state.lobby_id, %{consul_rename: false})
+    Battle.update_lobby_values(state.lobby_id, %{player_rename: false})
 
     ConsulServer.empty_state(state.lobby_id)
     |> ConsulServer.broadcast_update("reset")
@@ -1883,8 +1972,8 @@ defmodule Teiserver.Coordinator.ConsulCommands do
 
   def handle_command(%{senderid: senderid} = cmd, state) do
     if Map.has_key?(cmd, :raw) do
-      # LobbyChat.do_say(cmd.senderid, cmd.raw, state.lobby_id)
-      LobbyChat.sayprivateex(
+      # ChatLib.do_say(cmd.senderid, cmd.raw, state.lobby_id)
+      ChatLib.sayprivateex(
         state.coordinator_id,
         senderid,
         "No command of name '#{cmd.command}'",
@@ -1919,6 +2008,30 @@ defmodule Teiserver.Coordinator.ConsulCommands do
       },
       data
     )
+  end
+
+  defp allowed_to_set_rating_limit?(state) do
+    name =
+      state.lobby_id
+      |> Battle.get_lobby()
+      |> Map.get(:name)
+
+    cond do
+      allwelcome_name?(name) -> false
+      true -> true
+    end
+  end
+
+  defp allwelcome_name?(name) do
+    name =
+      name
+      |> String.downcase()
+      |> String.replace(" ", "")
+
+    cond do
+      String.contains?(name, "allwelcome") -> true
+      true -> false
+    end
   end
 
   @spec get_lock(String.t()) :: atom | nil

@@ -1,7 +1,7 @@
 defmodule TeiserverWeb.AdminDashLive.Policy do
   use TeiserverWeb, :live_view
   alias Phoenix.PubSub
-  import Central.Helpers.NumberHelper, only: [int_parse: 1]
+  import Teiserver.Helper.NumberHelper, only: [int_parse: 1]
 
   alias Teiserver
   alias Teiserver.{Game}
@@ -10,24 +10,22 @@ defmodule TeiserverWeb.AdminDashLive.Policy do
 
   @impl true
   def mount(%{"id" => id}, session, socket) do
-    :ok = PubSub.subscribe(Central.PubSub, "lobby_policy_updates:#{id}")
+    :ok = PubSub.subscribe(Teiserver.PubSub, "lobby_policy_updates:#{id}")
 
     socket =
       socket
       |> AuthPlug.live_call(session)
-      |> NotificationPlug.live_call()
       |> assign(:id, int_parse(id))
       |> add_breadcrumb(name: "Admin", url: "/teiserver/admin")
       |> add_breadcrumb(name: "Dashboard", url: "/admin/dashboard")
       |> add_breadcrumb(name: "Policy #{id}", url: "/admin/dashboard/policy/#{id}")
-      |> assign(:site_menu_active, "teiserver_admin")
-      |> assign(:view_colour, Central.Admin.AdminLib.colours())
-      |> assign(:menu_override, Routes.ts_general_general_path(socket, :index))
+      |> assign(:site_menu_active, "admin")
+      |> assign(:view_colour, Teiserver.Admin.AdminLib.colours())
       |> get_policy_bots
 
     :timer.send_interval(5_000, :tick)
 
-    {:ok, socket, layout: {CentralWeb.LayoutView, :standard_live}}
+    {:ok, socket}
   end
 
   @impl true
@@ -39,7 +37,7 @@ defmodule TeiserverWeb.AdminDashLive.Policy do
       false ->
         {:noreply,
          socket
-         |> redirect(to: Routes.general_page_path(socket, :index))}
+         |> redirect(to: ~p"/")}
     end
   end
 

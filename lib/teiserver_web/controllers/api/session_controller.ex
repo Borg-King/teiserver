@@ -1,17 +1,17 @@
 defmodule TeiserverWeb.API.SessionController do
-  use CentralWeb, :controller
-  alias Central.Account
-  alias Teiserver.User
+  use TeiserverWeb, :controller
+  alias Teiserver.{Account, CacheUser}
+  alias Teiserver.Account.UserLib
 
   @spec login(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def login(conn, %{"user" => %{"email" => email, "password" => password}}) do
     conn
-    |> Account.authenticate_user(email, password)
+    |> UserLib.authenticate_user(email, password)
     |> login_reply(conn)
   end
 
   defp login_reply({:ok, user}, conn) do
-    token = User.create_token(user)
+    token = CacheUser.create_token(user)
 
     conn
     |> put_status(200)
@@ -26,7 +26,7 @@ defmodule TeiserverWeb.API.SessionController do
 
   @spec register(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def register(conn, %{"user" => user_params}) do
-    user_params = Account.merge_default_params(user_params)
+    user_params = Account.UserLib.merge_default_params(user_params)
     config_setting = Teiserver.Config.get_site_config_cache("user.Enable user registrations")
 
     {allowed, reason} =
@@ -37,25 +37,25 @@ defmodule TeiserverWeb.API.SessionController do
         config_setting == "Disabled" ->
           {false, "disabled"}
 
-        config_setting == "Link only" ->
-          code = Teiserver.Account.get_code(user_params["code"] || "!no_code!")
+        # config_setting == "Link only" ->
+        #   code = Teiserver.Account.get_code(user_params["code"] || "!no_code!")
 
-          cond do
-            user_params["code"] == nil ->
-              {false, "no_code"}
+        #   cond do
+        #     user_params["code"] == nil ->
+        #       {false, "no_code"}
 
-            code == nil ->
-              {false, "invalid_code"}
+        #     code == nil ->
+        #       {false, "invalid_code"}
 
-            code.purpose != "user_registration" ->
-              {false, "invalid_code"}
+        #     code.purpose != "user_registration" ->
+        #       {false, "invalid_code"}
 
-            Timex.compare(Timex.now(), code.expires) == 1 ->
-              {false, "expired_code"}
+        #     Timex.compare(Timex.now(), code.expires) == 1 ->
+        #       {false, "expired_code"}
 
-            true ->
-              {true, nil}
-          end
+        #     true ->
+        #       {true, nil}
+        #   end
 
         true ->
           {false, "disabled"}
@@ -81,14 +81,14 @@ defmodule TeiserverWeb.API.SessionController do
           {:error, "Missing parameter 'password'"}
 
         true ->
-          case Account.self_create_user(user_params) do
+          case Account.create_user(user_params) do
             {:ok, user} ->
               case Teiserver.Account.get_code(user_params["code"]) do
                 nil ->
                   :ok
 
                 code ->
-                  add_audit_log(conn, "Account:User registration", %{
+                  add_audit_log(conn, "Account:CacheUser registration", %{
                     code_value: code.value,
                     code_creator: code.user_id
                   })
@@ -135,37 +135,38 @@ defmodule TeiserverWeb.API.SessionController do
       end
 
     result =
-      case User.get_user_by_email(email) do
+      case CacheUser.get_user_by_email(email) do
         nil ->
           {:error, "Invalid email"}
 
         user ->
-          # Are they an md5 conversion user?
-          case user.spring_password do
+          # First, try to do it without using the spring password
+          db_user = Account.get_user!(user.id)
+
+          case Teiserver.Account.User.verify_password(raw_password, db_user.password) do
             true ->
-              # Yes, we can test and update their password accordingly!
-              md5_password = User.spring_md5_password(raw_password)
-
-              case User.test_password(md5_password, user.password_hash) do
-                true ->
-                  # Update the db user then the cached user
-                  db_user = Account.get_user!(user.id)
-                  Central.Account.update_user(db_user, %{"password" => raw_password})
-                  User.recache_user(user.id)
-                  User.update_user(%{user | spring_password: false}, persist: true)
-
-                  make_token(conn, user, expires)
-
-                false ->
-                  {:error, "Invalid credentials."}
-              end
+              make_token(conn, user, expires)
 
             false ->
-              db_user = Account.get_user!(user.id)
-
-              case Central.Account.User.verify_password(raw_password, db_user.password) do
+              # Are they an md5 conversion user?
+              case user.spring_password do
                 true ->
-                  make_token(conn, user, expires)
+                  # Yes, we can test and update their password accordingly!
+                  md5_password = CacheUser.spring_md5_password(raw_password)
+
+                  case CacheUser.test_password(md5_password, user.password_hash) do
+                    true ->
+                      # Update the db user then the cached user
+                      db_user = Account.get_user!(user.id)
+                      Teiserver.Account.update_user(db_user, %{"password" => raw_password})
+                      CacheUser.recache_user(user.id)
+                      CacheUser.update_user(%{user | spring_password: false}, persist: true)
+
+                      make_token(conn, user, expires)
+
+                    false ->
+                      {:error, "Invalid credentials."}
+                  end
 
                 false ->
                   {:error, "Invalid credentials"}

@@ -1,7 +1,7 @@
 defmodule TeiserverWeb.Report.ExportsController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
   alias Teiserver.{Game, Account}
-  import Central.Account.AuthLib, only: [allow?: 2]
+  import Teiserver.Account.AuthLib, only: [allow?: 2]
 
   plug(AssignPlug,
     site_menu_active: "teiserver_report",
@@ -11,7 +11,7 @@ defmodule TeiserverWeb.Report.ExportsController do
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Telemetry.Infolog,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(:add_breadcrumb, name: "Teiserver", url: "/teiserver")
   plug(:add_breadcrumb, name: "Reports", url: "/teiserver/reports")
@@ -27,7 +27,7 @@ defmodule TeiserverWeb.Report.ExportsController do
   def show(conn, %{"id" => id}) do
     module = get_module(id)
 
-    if allow?(conn.current_user, module.permissions) do
+    if allow?(conn.assigns.current_user, module.permissions) do
       assigns = module.show_form(conn)
 
       assigns
@@ -49,7 +49,7 @@ defmodule TeiserverWeb.Report.ExportsController do
   def download(conn, %{"id" => id, "report" => report_params}) do
     module = get_module(id)
 
-    if allow?(conn.current_user, module.permissions) do
+    if allow?(conn.assigns.current_user, module.permissions) do
       case module.show_form(conn, report_params) do
         {:file, file_path, file_name, content_type} ->
           conn

@@ -1,13 +1,13 @@
 defmodule TeiserverWeb.Admin.ChatController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.{Coordinator, Chat}
-  import Central.Helpers.StringHelper, only: [get_hash_id: 1]
+  import Teiserver.Helper.StringHelper, only: [get_hash_id: 1]
 
   plug Bodyguard.Plug.Authorize,
     policy: Teiserver.Chat.LobbyMessage,
     action: {Phoenix.Controller, :action_name},
-    user: {Central.Account.AuthLib, :current_user}
+    user: {Teiserver.Account.AuthLib, :current_user}
 
   plug(AssignPlug,
     site_menu_active: "chat",
@@ -15,7 +15,7 @@ defmodule TeiserverWeb.Admin.ChatController do
   )
 
   plug :add_breadcrumb, name: 'Admin', url: '/teiserver/admin'
-  plug :add_breadcrumb, name: 'Chat', url: '/teiserver/admin/chat'
+  plug :add_breadcrumb, name: 'Chat', url: '/admin/chat'
 
   @spec index(Plug.Conn.t(), Map.t()) :: Plug.Conn.t()
   def index(conn, %{"search" => params}) do

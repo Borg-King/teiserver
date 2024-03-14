@@ -1,6 +1,6 @@
 defmodule Teiserver.Battle.ExportAggregateMatchMetricsTask do
-  alias Teiserver.Telemetry
-  alias Central.Helpers.{DatePresets}
+  alias Teiserver.Logging
+  alias Teiserver.Helper.{DatePresets}
 
   def perform(params) do
     {start_date, end_date} =
@@ -13,7 +13,7 @@ defmodule Teiserver.Battle.ExportAggregateMatchMetricsTask do
     start_date = Timex.to_datetime(start_date)
     end_date = Timex.to_datetime(end_date)
 
-    Telemetry.list_server_day_logs(
+    Logging.list_server_day_logs(
       search: [
         start_date: start_date,
         end_date: end_date
@@ -28,7 +28,7 @@ defmodule Teiserver.Battle.ExportAggregateMatchMetricsTask do
     data
     |> Stream.map(fn log ->
       log.data
-      |> Map.drop(["minutes_per_user"])
+      |> Map.drop(["minutes_per_user", "old_minutes_per_user"])
       |> Map.put("date", log.date)
     end)
     |> Enum.to_list()

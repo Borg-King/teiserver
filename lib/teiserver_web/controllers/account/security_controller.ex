@@ -1,9 +1,8 @@
 defmodule TeiserverWeb.Account.SecurityController do
-  use CentralWeb, :controller
+  use TeiserverWeb, :controller
 
   alias Teiserver.Account
 
-  plug(:add_breadcrumb, name: 'Teiserver', url: '/teiserver')
   plug(:add_breadcrumb, name: 'Account', url: '/teiserver/account')
   plug(:add_breadcrumb, name: 'Security', url: '/teiserver/account/security')
 
@@ -17,7 +16,7 @@ defmodule TeiserverWeb.Account.SecurityController do
     user_tokens =
       Account.list_user_tokens(
         search: [
-          user_id: conn.user_id
+          user_id: conn.assigns.current_user.id
         ],
         order_by: "Most recently used"
       )
@@ -29,7 +28,7 @@ defmodule TeiserverWeb.Account.SecurityController do
 
   @spec edit_password(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def edit_password(conn, _params) do
-    user = Account.get_user!(conn.user_id)
+    user = Account.get_user!(conn.assigns.current_user.id)
     changeset = Account.change_user(user)
 
     conn
@@ -41,12 +40,12 @@ defmodule TeiserverWeb.Account.SecurityController do
 
   @spec update_password(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def update_password(conn, %{"user" => user_params}) do
-    user = Account.get_user!(conn.user_id)
+    user = Account.get_user!(conn.assigns.current_user.id)
 
-    case Central.Account.update_user(user, user_params, :password) do
+    case Account.update_user_password(user, user_params) do
       {:ok, _user} ->
         # User password updated
-        Teiserver.User.set_new_spring_password(user.id, user_params["password"])
+        Teiserver.CacheUser.set_new_spring_password(user.id, user_params["password"])
 
         conn
         |> put_flash(:info, "Account password updated successfully.")
@@ -62,7 +61,7 @@ defmodule TeiserverWeb.Account.SecurityController do
     token =
       Account.get_user_token(id,
         search: [
-          user_id: conn.user_id
+          user_id: conn.assigns.current_user.id
         ]
       )
 
